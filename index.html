@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yhack — Évaluez la sécurité de vos sites</title>
+    <meta name="description" content="Page d'accueil professionnelle d'un outil d'audit de cybersécurité. Testez les failles courantes, la configuration, et la surface d'attaque d'un site web." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg fx-grid"></div>
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="Yhack Accueil">
+        <span class="logo" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2l7 4v5c0 5-3.6 9.4-7 11-3.4-1.6-7-6-7-11V6l7-4z" stroke="#00FFA3" stroke-width="1.5" fill="rgba(0,255,163,0.08)"/>
+            <path d="M8 11l3 3 5-5" stroke="#00E5FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span class="brand-name">Yhack</span>
+      </a>
+      <nav class="nav">
+        <a href="#features">Fonctionnalités</a>
+        <a href="#how">Comment ça marche</a>
+        <a href="#contact">Contact</a>
+        <a class="btn btn--ghost" href="#scan">Lancer un scan</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" id="scan">
+        <div class="hero__content">
+          <h1>
+            Auditez la sécurité de vos sites<br />
+            <span class="accent">comme un pro</span>
+          </h1>
+          <p class="subtitle">
+            Détection des failles courantes (OWASP), analyse de configuration, en-têtes, TLS,
+            CMS et surface d'attaque. En un seul tableau de bord.
+          </p>
+          <form class="scan-form" aria-label="Formulaire de scan" novalidate>
+            <label class="visually-hidden" for="targetUrl">URL à analyser</label>
+            <input id="targetUrl" name="targetUrl" type="url" inputmode="url" placeholder="https://votre-site.com" aria-describedby="scanHelp" required />
+            <button class="btn btn--primary" type="submit">Analyser</button>
+              <small id="scanHelp" class="form-help">⚠️ Tests de sécurité réels (SQLi, XSS, brute-force). Utilisez uniquement avec autorisation.</small>
+          </form>
+          <div class="trust">
+            <span class="chip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7l-9 9-5-5" stroke="#00FFA3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Conforme bonnes pratiques
+            </span>
+            <span class="chip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2l7 4v5c0 5-3.6 9.4-7 11-3.4-1.6-7-6-7-11V6l7-4z" stroke="#00E5FF" stroke-width="1.5"/></svg>
+              Focus cybersécurité
+            </span>
+          </div>
+        </div>
+        <div class="hero__visual" aria-hidden="true">
+          <div class="orb orb--green"></div>
+          <div class="orb orb--cyan"></div>
+          <div class="terminal">
+            <div class="terminal__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="title">terminal YHACK</span>
+            </div>
+            <pre class="terminal__body"><code id="terminalBody"><span class="mono-dim">$</span> probe https://votre-site.com --modules owasp,tls,headers</code></pre>
+          </div>
+          <div class="report">
+            <button id="reportToggle" class="btn btn--ghost" type="button" disabled>Rapport synthétique</button>
+            <div id="reportPanel" class="report__panel" hidden>
+              <div class="report__score">
+                <div class="score__ring"><span id="scoreValue">--</span></div>
+                <div class="score__label">Score global</div>
+              </div>
+              <div class="report__grid">
+                <div>
+                  <h4>Résumé modules</h4>
+                  <ul id="reportSummary" class="report__list"></ul>
+                </div>
+                <div>
+                  <h4>Recommandations</h4>
+                  <ul id="reportRecs" class="report__list"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <h2 class="section__title reveal">Couverture de vulnérabilités</h2>
+        <p class="section__lead reveal">Une approche complète inspirée de l'OWASP et des contrôles de configuration.</p>
+        <div class="features">
+          <article class="card reveal">
+            <h3>OWASP Top 10</h3>
+            <p>Injection, XSS, auth/session, exposition de données, SSRF, plus.</p>
+          </article>
+          <article class="card reveal">
+            <h3>Surface d'exposition</h3>
+            <p>Découverte de sous-domaines, technologies, ports, chemins sensibles.</p>
+          </article>
+          <article class="card reveal">
+            <h3>TLS/Chiffrement</h3>
+            <p>Versions, suites, HSTS, OCSP, pratiques modernes et obsolètes.</p>
+          </article>
+          <article class="card reveal">
+            <h3>En-têtes de sécurité</h3>
+            <p>CSP, X-Frame-Options, X-Content-Type, Referrer-Policy, et plus.</p>
+          </article>
+          <article class="card reveal">
+            <h3>CMS & Plugins</h3>
+            <p>Détection de versions vulnérables et modules non maintenus.</p>
+          </article>
+          <article class="card reveal">
+            <h3>Rapports clairs</h3>
+            <p>Score global, priorisation, recommandations actionnables.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="how">
+        <h2 class="section__title reveal">Comment ça marche</h2>
+        <div class="steps">
+          <div class="step reveal">
+            <span class="step__num">1</span>
+            <h3>Entrez une URL</h3>
+            <p>Indiquez la cible à auditer. Le scan reste non intrusif.</p>
+          </div>
+          <div class="step reveal">
+            <span class="step__num">2</span>
+            <h3>Analyse multi-modules</h3>
+            <p>Modules configurables: OWASP, headers, TLS, CMS, exposition.</p>
+          </div>
+          <div class="step reveal">
+            <span class="step__num">3</span>
+            <h3>Rapport priorisé</h3>
+            <p>Failles classées par sévérité avec remédiations concrètes.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta section">
+        <div class="cta__inner">
+          <h2 class="reveal">Prêt à évaluer votre exposition ?</h2>
+          <p class="reveal">Commencez avec un aperçu gratuit et des recommandations rapides.</p>
+          <a class="btn btn--primary reveal" href="#scan">Lancer un scan</a>
+        </div>
+      </section>
+
+      <section class="section" id="terms">
+        <h2 class="section__title">Conditions d'utilisation</h2>
+        <p class="section__lead">
+          L'outil Yhack est fourni à des fins pédagogiques et d'audit de sécurité légitime uniquement.
+          En l'utilisant, vous acceptez les points suivants :
+        </p>
+        <ul class="small" style="max-width: 72ch; padding-left: 1.1rem;">
+          <li><strong>Autorisation préalable</strong> : vous ne scannez que des systèmes pour lesquels vous disposez d'une autorisation écrite explicite.</li>
+          <li><strong>Responsabilité</strong> : vous êtes seul responsable de l'usage que vous faites de l'outil et des conséquences juridiques ou techniques qui en découlent.</li>
+          <li><strong>Usage non destructif</strong> : vous vous engagez à ne pas utiliser Yhack pour perturber un service, exécuter des attaques de déni de service ou exploiter des failles en production.</li>
+          <li><strong>Données collectées</strong> : les résultats de scans peuvent contenir des informations sensibles. Vous vous engagez à les stocker et les partager de manière sécurisée et conforme à la réglementation applicable.</li>
+          <li><strong>Contexte pédagogique</strong> : ce prototype a été conçu dans le cadre d'un projet universitaire et ne constitue pas un service commercial.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="site-footer" id="contact">
+      <div class="footer__grid">
+        <div>
+          <div class="brand brand--footer">
+            <span class="logo" aria-hidden="true"></span>
+            <span class="brand-name">Yhack</span>
+          </div>
+          <p class="small">Prototype étudient ultra qualitatif.</p>
+        </div>
+        <nav class="footer__nav">
+          <a href="#features">Fonctionnalités</a>
+          <a href="#how">Méthodologie</a>
+          <a href="#scan">Démarrer</a>
+        </nav>
+        <div class="footer__legal small">
+          <span>© <span id="year"></span> Yhack</span>
+          <a href="#terms">Conditions d'utilisation</a>
+          <a href="#">Mentions légales</a>
+          <a href="#">Confidentialité</a>
+        </div>
+      </div>
+    </footer>
+
+    <script src="script.js" defer></script>
+  </body>
+  </html>
