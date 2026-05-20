@@ -45,7 +45,7 @@
             <label class="visually-hidden" for="targetUrl">URL à analyser</label>
             <input id="targetUrl" name="targetUrl" type="url" inputmode="url" placeholder="https://votre-site.com" aria-describedby="scanHelp" required />
             <button class="btn btn--primary" type="submit">Analyser</button>
-              <small id="scanHelp" class="form-help">⚠️ Tests de sécurité réels (SQLi, XSS, brute-force). Utilisez uniquement avec autorisation.</small>
+            <small id="scanHelp" class="form-help">⚠️ Tests de sécurité réels (SQLi, XSS, brute-force). Utilisez uniquement avec autorisation.</small>
           </form>
           <div class="trust">
             <span class="chip">
@@ -68,24 +68,40 @@
             </div>
             <pre class="terminal__body"><code id="terminalBody"><span class="mono-dim">$</span> probe https://votre-site.com --modules owasp,tls,headers</code></pre>
           </div>
-          <div class="report">
-            <button id="reportToggle" class="btn btn--ghost" type="button" disabled>Rapport synthétique</button>
-            <div id="reportPanel" class="report__panel" hidden>
-              <div class="report__score">
-                <div class="score__ring"><span id="scoreValue">--</span></div>
-                <div class="score__label">Score global</div>
-              </div>
-              <div class="report__grid">
-                <div>
-                  <h4>Résumé modules</h4>
-                  <ul id="reportSummary" class="report__list"></ul>
-                </div>
-                <div>
-                  <h4>Recommandations</h4>
-                  <ul id="reportRecs" class="report__list"></ul>
-                </div>
-              </div>
+        </div>
+      </section>
+
+      <section id="fullReport" class="section report-section" hidden>
+        <div class="report-top">
+          <div class="grade-block">
+            <div class="grade-ring-wrap">
+              <svg class="grade-ring-svg" viewBox="0 0 80 80" aria-hidden="true">
+                <circle class="grade-ring-bg" cx="40" cy="40" r="34"/>
+                <circle class="grade-ring-fill" id="gradeRingFill" cx="40" cy="40" r="34"/>
+              </svg>
+              <span class="grade-letter" id="gradeLetter">--</span>
             </div>
+            <div class="grade-info">
+              <div class="grade-score-num"><span id="scoreNum">--</span><span class="grade-max">/100</span></div>
+              <div class="grade-label">Score de sécurité</div>
+            </div>
+          </div>
+          <div class="report-meta" id="reportMeta"></div>
+        </div>
+
+        <h3 class="report-sub">Modules analysés</h3>
+        <div class="modules-grid" id="modulesGrid"></div>
+
+        <div id="improvSection" hidden>
+          <h3 class="report-sub">Axes d'amélioration <span class="improv-count" id="improvCount"></span></h3>
+          <div class="improvements-list" id="improvementsList"></div>
+        </div>
+
+        <div class="all-clear" id="allClearMsg" hidden>
+          <div class="all-clear-icon">✓</div>
+          <div>
+            <strong>Excellent !</strong>
+            <p>Aucun problème critique détecté. La configuration de sécurité est exemplaire.</p>
           </div>
         </div>
       </section>

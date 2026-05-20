@@ -1,0 +1,9 @@
+services:
+  yhack:
+    build: .
+    ports:
+      - "80:5050"
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=5050

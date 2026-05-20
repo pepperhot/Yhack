@@ -1,251 +1,308 @@
-// Set current year in footer
+'use strict';
+
 (function setYear() {
-	var yearEl = document.getElementById('year');
-	if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+  const yearEl = document.getElementById('year');
+  if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 })();
 
-// Simple URL validation for prototype form
 (function scanForm() {
-    var form = document.querySelector('.scan-form');
-    if (!form) return;
-    var input = form.querySelector('input[type="url"]');
-    var termEl = document.getElementById('terminalBody');
-    var reportToggle = document.getElementById('reportToggle');
-    var reportPanel = document.getElementById('reportPanel');
-    var reportSummary = document.getElementById('reportSummary');
-    var reportRecs = document.getElementById('reportRecs');
-    var scoreValue = document.getElementById('scoreValue');
+  const form  = document.querySelector('.scan-form');
+  if (!form) return;
 
-    function writeLine(line) {
-        if (!termEl) return;
-        termEl.innerHTML += "\n" + line;
-    }
+  const input  = form.querySelector('input[type="url"]');
+  const termEl = document.getElementById('terminalBody');
 
-    function resetTerminal(command) {
-        if (!termEl) return;
-        termEl.textContent = '';
-        termEl.innerHTML = '<span class="mono-dim">$</span> ' + command;
-    }
+  const API_URL      = window.location.origin; // s'adapte automatiquement peu importe le serveur
+  const POLL_INTERVAL = 800;
 
-    function hashString(s) {
-        var h = 0, i = 0, len = s.length|0;
-        for (; i < len; i++) { h = (h << 5) - h + s.charCodeAt(i); h |= 0; }
-        return Math.abs(h);
-    }
+  function escHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
-    function toStatus(okRatio) {
-        return okRatio > 0.66 ? 'OK' : (okRatio > 0.33 ? 'WARN' : 'FAIL');
-    }
+  function writeLine(line) {
+    if (!termEl) return;
+    termEl.innerHTML += '\n' + line;
+    termEl.scrollTop = termEl.scrollHeight;
+  }
 
-    function runMockScan(targetUrl) {
-        var u = new URL(targetUrl.startsWith('http') ? targetUrl : 'https://' + targetUrl);
-        var hostHash = hashString(u.hostname);
-        var isHttps = u.protocol === 'https:';
+  function resetTerminal(command) {
+    if (!termEl) return;
+    termEl.textContent = '';
+    termEl.innerHTML = '<span class="mono-dim">$</span> ' + command;
+  }
 
-        // Deterministic pseudo-results from hostname
-        var ratios = {
-            dns: (hostHash % 100) / 100,
-            tls: isHttps ? ((hostHash >> 3) % 100) / 100 : 0.2,
-            headers: ((hostHash >> 5) % 100) / 100,
-            cms: ((hostHash >> 7) % 100) / 100,
-            vulns: ((hostHash >> 9) % 100) / 100,
-            subdomains: ((hostHash >> 11) % 100) / 100,
-            ports: ((hostHash >> 13) % 100) / 100,
-            sqli: ((hostHash >> 15) % 100) / 100,
-            xss: ((hostHash >> 17) % 100) / 100,
-            bruteforce: ((hostHash >> 19) % 100) / 100
-        };
+  function mapResultsToStatus(results) {
+    if (!results) return {};
+    const keys = [
+      'dns', 'tls', 'headers', 'cors', 'cookies', 'tech',
+      'sensitive_files', 'robots', 'ports',
+      'sqli', 'xss', 'lfi', 'rce', 'mako',
+      'open_redirect', 'http_methods', 'vulns',
+    ];
+    const map = {};
+    keys.forEach(k => { if (results[k]?.status) map[k] = results[k].status; });
+    return map;
+  }
 
-        var statuses = {
-            dns: 'OK',
-            tls: toStatus(ratios.tls),
-            headers: toStatus(ratios.headers),
-            cms: toStatus(ratios.cms),
-            vulns: toStatus(ratios.vulns),
-            subdomains: toStatus(ratios.subdomains),
-            ports: toStatus(ratios.ports),
-            sqli: toStatus(1 - ratios.sqli), // higher ratio => worse risk; invert
-            xss: toStatus(1 - ratios.xss),
-            bruteforce: toStatus(ratios.bruteforce)
-        };
-        // DNS considered OK unless domain looks invalid; minimal check
-        if (!u.hostname || u.hostname.indexOf('.') === -1) statuses.dns = 'FAIL';
+  function buildReport(statuses, fullResults, scanMeta) {
+    const reportSection = document.getElementById('fullReport');
+    if (!reportSection) return;
 
-        var command = 'probe ' + u.href + ' --modules owasp,tls,headers,subdomains,ports,sqli,xss,bruteforce';
-        resetTerminal(command);
-
-        // reset report
-        if (reportSummary) reportSummary.innerHTML = '';
-        if (reportRecs) reportRecs.innerHTML = '';
-        if (scoreValue) scoreValue.textContent = '--';
-        if (reportPanel) reportPanel.hidden = true;
-        if (reportToggle) { reportToggle.disabled = true; reportToggle.textContent = 'Rapport synthétique'; }
-
-        var steps = [
-            { key: 'dns',       label: 'Résolution DNS',       delay: 600 },
-            { key: 'tls',       label: 'Vérification TLS',     delay: 700 },
-            { key: 'headers',   label: 'En-têtes de sécurité', delay: 700 },
-            { key: 'cms',       label: 'CMS et plugins',       delay: 650 },
-            { key: 'subdomains',label: 'Sous-domaines',        delay: 600 },
-            { key: 'ports',     label: 'Ports exposés',        delay: 650 },
-            { key: 'sqli',      label: 'Injection SQL',        delay: 700 },
-            { key: 'xss',       label: 'Cross-Site Scripting (XSS)', delay: 700 },
-            { key: 'bruteforce',label: 'Résilience brute-force', delay: 700 },
-            { key: 'vulns',     label: 'Détection vulnérabilités', delay: 800 }
-        ];
-
-        var i = 0;
-        function next() {
-            if (i >= steps.length) {
-                writeLine('<span class="mono-dim"># Rapport synthétique prêt ▸</span>');
-                buildReport(statuses);
-                return;
-            }
-            var step = steps[i++];
-            var status = statuses[step.key];
-            var colorClass = status === 'OK' ? 'mono-green' : (status === 'WARN' ? 'mono-yellow' : 'mono-dim');
-            setTimeout(function () {
-                writeLine('<span class="mono-green">▸</span> ' + step.label + ' .......... ' + '<span class="' + colorClass + '">' + status + '</span>');
-                next();
-            }, step.delay);
-        }
-        next();
-    }
-
-    function buildReport(statuses) {
-        var keys = [
-            ['dns','DNS'], ['tls','TLS'], ['headers','En-têtes'], ['cms','CMS'],
-            ['subdomains','Sous-domaines'], ['ports','Ports'], ['sqli','SQLi'], ['xss','XSS'], ['bruteforce','Brute-force'], ['vulns','Vulnérabilités']
-        ];
-        
-        var defs = {
-            dns: "Résolution et config de base du domaine",
-            tls: "Certificats, protocoles et chiffrement",
-            headers: "En-têtes de sécurité (CSP, HSTS...)",
-            cms: "Détection du CMS et versions obsolètes",
-            subdomains: "Points d'entrée sur le même domaine",
-            ports: "Services exposés sur le réseau",
-            sqli: "Injection de commandes SQL malveillantes",
-            xss: "Injection de scripts dans le navigateur",
-            bruteforce: "Tentatives de deviner des mots de passe",
-            vulns: "Failles publiques (CVE) connues"
-        };
-
-        var weights = { dns: 0.05, tls: 0.15, headers: 0.15, cms: 0.1, subdomains: 0.1, ports: 0.1, sqli: 0.2, xss: 0.15, bruteforce: 0.1, vulns: 0.1 };
-        function scoreOf(status) { return status === 'OK' ? 1 : (status === 'WARN' ? 0.5 : 0); }
-        var score = 0;
-        var totalWeight = 0;
-        keys.forEach(function(k){ 
-            var w = weights[k[0]] || 0;
-            if (statuses[k[0]]) {
-                score += w * scoreOf(statuses[k[0]]);
-                totalWeight += w;
-            }
-        });
-        var percent = totalWeight > 0 ? Math.round((score / totalWeight) * 100) : 0;
-        if (scoreValue) scoreValue.textContent = String(percent);
-        if (reportSummary) {
-            reportSummary.innerHTML = '';
-            keys.forEach(function(k){
-                var key = k[0];
-                var label = k[1];
-                var st = statuses[key];
-                var cls = st === 'OK' ? 'mono-green' : (st === 'WARN' ? 'mono-yellow' : 'mono-dim');
-                var li = document.createElement('li');
-                var tooltip = defs[key] ? ' <span class="info-icon" data-tooltip="' + defs[key] + '">i</span>' : '';
-                li.innerHTML = '<strong>' + label + '</strong>' + tooltip + ': <span class="' + cls + '">' + st + '</span>';
-                reportSummary.appendChild(li);
-            });
-        }
-        if (reportRecs) {
-            reportRecs.innerHTML = '';
-            var recs = [];
-            if (statuses.headers !== 'OK') recs.push('Configurer CSP, HSTS, X-Frame-Options, X-Content-Type, Referrer-Policy.');
-            if (statuses.tls !== 'OK') recs.push('Forcer HTTPS, désactiver TLS obsolète, activer HSTS, ciphers modernes.');
-            if (statuses.sqli === 'FAIL') recs.push('CRITIQUE: Injection SQL détectée. Utiliser requêtes préparées, validation stricte, ORM, whitelist des entrées.');
-            if (statuses.xss === 'FAIL') recs.push('CRITIQUE: XSS détecté. Encoder toutes les sorties HTML/JS, utiliser CSP strict, éviter innerHTML non sécurisé.');
-            if (statuses.bruteforce !== 'OK') recs.push('Activer rate limiting sur les endpoints d\'authentification, CAPTCHA, verrouillage de compte après échecs.');
-            if (statuses.ports !== 'OK') recs.push('Fermer les ports inutiles, segmenter le réseau, filtrer via pare-feu.');
-            if (statuses.subdomains !== 'OK') recs.push('Auditer les sous-domaines et supprimer DNS orphelins.');
-            if (statuses.vulns !== 'OK') recs.push('Mettre à jour dépendances et CMS, appliquer les correctifs de sécurité.');
-            if (recs.length === 0) recs.push('Aucune recommandation prioritaire. Continuer la veille et le durcissement.');
-            recs.forEach(function (r) { var li = document.createElement('li'); li.textContent = r; reportRecs.appendChild(li); });
-        }
-        if (reportToggle) {
-            reportToggle.disabled = false;
-            reportToggle.onclick = function(){ if (!reportPanel) return; reportPanel.hidden = !reportPanel.hidden; };
-        }
-    }
-
-    async function runBackendScan(targetUrl) {
-        // Use relative path if served via HTTP/HTTPS, otherwise fallback to localhost:5050 for file://
-        var api = (window.YHACK_API || (location.protocol.startsWith('http') ? '' : 'http://localhost:5050'));
-        try {
-            var res = await fetch(api + '/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetUrl: targetUrl }) });
-            if (!res.ok) throw new Error('API init failed');
-            var data = await res.json();
-            var id = data.scanId;
-            resetTerminal('probe ' + targetUrl + ' --modules auto');
-            var lastLen = 0;
-            var poll = setInterval(async function(){
-                try {
-                    var r = await fetch(api + '/api/scan/' + id);
-                    if (!r.ok) throw new Error('poll failed');
-                    var j = await r.json();
-                    var lines = Array.isArray(j.lines) ? j.lines : [];
-                    for (var i = lastLen; i < lines.length; i++) writeLine(lines[i]);
-                    lastLen = lines.length;
-                    if (j.status === 'done' || j.status === 'error') {
-                        clearInterval(poll);
-                        writeLine('<span class="mono-dim"># Rapport synthétique prêt ▸</span>');
-                        if (j.results) buildReport(convertResultsToStatuses(j.results));
-                    }
-                } catch (e) {
-                    clearInterval(poll);
-                    writeLine('<span class="mono-dim"># API indisponible</span>');
-                }
-            }, 800);
-        } catch (e) {
-            throw e;
-        }
-    }
-
-    function convertResultsToStatuses(results) {
-        var map = {};
-        Object.keys(results || {}).forEach(function(k){ map[k] = results[k].status || 'WARN'; });
-        return map;
-    }
-
-    form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var url = (input && input.value || '').trim();
-        try {
-            if (!url) throw new Error('empty');
-            var normalized = url.startsWith('http') ? url : 'https://' + url;
-            new URL(normalized); // will throw if invalid
-            // try backend first, then fallback to mock
-            runBackendScan(normalized).catch(function(){ runMockScan(normalized); });
-        } catch (err) {
-            alert('Veuillez saisir une URL valide (ex: https://exemple.com)');
-            input && input.focus();
-        }
+    // ── Score ─────────────────────────────────────────────────────────────────
+    const scored = [
+      { key: 'sqli', w: 3 }, { key: 'xss', w: 3 }, { key: 'rce', w: 3 },
+      { key: 'lfi',  w: 3 }, { key: 'mako', w: 3 },
+      { key: 'tls',  w: 2 }, { key: 'headers', w: 2 }, { key: 'cors', w: 2 },
+      { key: 'dns',  w: 1 }, { key: 'cookies', w: 1 }, { key: 'ports', w: 1 },
+      { key: 'sensitive_files', w: 1 }, { key: 'robots', w: 1 },
+      { key: 'tech', w: 1 }, { key: 'open_redirect', w: 1 }, { key: 'http_methods', w: 1 },
+    ];
+    let pts = 0, total = 0;
+    scored.forEach(({ key, w }) => {
+      const st = statuses[key];
+      if (st) { pts += w * (st === 'OK' ? 1 : st === 'WARN' ? 0.5 : 0); total += w; }
     });
+    const pct   = total > 0 ? Math.round((pts / total) * 100) : 0;
+    const grade = pct >= 90 ? 'A' : pct >= 75 ? 'B' : pct >= 60 ? 'C' : pct >= 40 ? 'D' : 'F';
+    const gc    = { A: '#00ffa3', B: '#7fff7f', C: '#ffd166', D: '#ff9a3c', F: '#ff5c8a' }[grade];
+
+    // ── Animate ring ──────────────────────────────────────────────────────────
+    const ringFill  = document.getElementById('gradeRingFill');
+    const gLetter   = document.getElementById('gradeLetter');
+    const scoreNum  = document.getElementById('scoreNum');
+    const circ      = 2 * Math.PI * 34; // ≈213.6
+
+    if (ringFill) {
+      ringFill.style.strokeDasharray  = circ;
+      ringFill.style.strokeDashoffset = String(circ);
+      ringFill.style.stroke = gc;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        ringFill.style.strokeDashoffset = String(circ * (1 - pct / 100));
+      }));
+    }
+    if (gLetter) { gLetter.textContent = grade; gLetter.style.color = gc; }
+    if (scoreNum) scoreNum.textContent = String(pct);
+
+    // ── Meta ──────────────────────────────────────────────────────────────────
+    const reportMetaEl = document.getElementById('reportMeta');
+    if (reportMetaEl) {
+      const crits = fullResults?.vulns?.critical_issues || 0;
+      const warns = fullResults?.vulns?.warnings        || 0;
+      const dur   = scanMeta?.duration_ms ? Math.round(scanMeta.duration_ms / 1000) + 's' : '';
+      reportMetaEl.innerHTML = `
+        <div class="meta-target">${escHtml(scanMeta?.target || '')}</div>
+        <div class="meta-stats">
+          ${crits > 0 ? `<span class="meta-badge meta-badge--red">${crits} critique${crits > 1 ? 's' : ''}</span>` : ''}
+          ${warns > 0 ? `<span class="meta-badge meta-badge--yellow">${warns} avertissement${warns > 1 ? 's' : ''}</span>` : ''}
+          ${crits === 0 && warns === 0 ? '<span class="meta-badge meta-badge--green">Aucun problème</span>' : ''}
+          ${dur ? `<span class="meta-badge">⏱ ${escHtml(dur)}</span>` : ''}
+        </div>
+      `;
+    }
+
+    // ── Module cards ──────────────────────────────────────────────────────────
+    const MODULE_META = [
+      { key: 'dns',             label: 'DNS',           note: 'Résolution & enregistrements' },
+      { key: 'tls',             label: 'TLS/SSL',       note: 'Certificat & chiffrement' },
+      { key: 'headers',         label: 'En-têtes',      note: 'Headers de sécurité HTTP' },
+      { key: 'cors',            label: 'CORS',          note: 'Cross-Origin Policy' },
+      { key: 'cookies',         label: 'Cookies',       note: 'HttpOnly / Secure / SameSite' },
+      { key: 'tech',            label: 'Technologies',  note: 'Stack & disclosure' },
+      { key: 'sensitive_files', label: 'Fichiers',      note: '.env, .git, backups...' },
+      { key: 'robots',          label: 'robots.txt',    note: 'Chemins révélés' },
+      { key: 'ports',           label: 'Ports TCP',     note: 'Services exposés' },
+      { key: 'sqli',            label: 'SQLi',          note: 'Error-based & blind' },
+      { key: 'xss',             label: 'XSS',           note: 'Scripting réfléchi' },
+      { key: 'lfi',             label: 'LFI',           note: 'File Inclusion locale' },
+      { key: 'rce',             label: 'RCE',           note: 'Exécution de code' },
+      { key: 'mako',            label: 'SSTI',          note: 'Template Injection' },
+      { key: 'open_redirect',   label: 'Redirect',      note: 'Open Redirect' },
+      { key: 'http_methods',    label: 'Méthodes HTTP', note: 'PUT, DELETE, TRACE' },
+    ];
+
+    const modulesGrid = document.getElementById('modulesGrid');
+    if (modulesGrid) {
+      modulesGrid.innerHTML = '';
+      MODULE_META.forEach(({ key, label, note }) => {
+        const st = statuses[key];
+        if (!st) return;
+        const cls   = st === 'OK' ? 'ok' : st === 'WARN' ? 'warn' : 'fail';
+        const badge = st === 'OK' ? '✓ OK' : st === 'WARN' ? '⚠ WARN' : '✗ FAIL';
+        const div   = document.createElement('div');
+        div.className = `module-card module-card--${cls}`;
+        div.innerHTML = `
+          <div class="module-card__name">${escHtml(label)}</div>
+          <div class="module-card__status module-card__status--${cls}">${badge}</div>
+          <div class="module-card__note">${escHtml(note)}</div>
+        `;
+        modulesGrid.appendChild(div);
+      });
+    }
+
+    // ── Improvements ─────────────────────────────────────────────────────────
+    const NAMES = {
+      headers:         'En-têtes de sécurité HTTP',
+      tls:             'Chiffrement TLS/SSL',
+      cors:            'Configuration CORS',
+      cookies:         'Sécurité des cookies',
+      sensitive_files: 'Fichiers sensibles exposés',
+      robots:          'Disclosure via robots.txt',
+      ports:           'Ports TCP exposés',
+      sqli:            'SQL Injection',
+      xss:             'Cross-Site Scripting',
+      lfi:             'Local File Inclusion',
+      rce:             'Remote Code Execution',
+      mako:            'Server-Side Template Injection',
+      open_redirect:   'Open Redirect',
+      http_methods:    'Méthodes HTTP dangereuses',
+      dns:             'Configuration DNS',
+      tech:            'Exposition des technologies',
+    };
+
+    const improvements = [];
+    if (fullResults) {
+      Object.entries(fullResults).forEach(([key, result]) => {
+        if (!result || result.status === 'OK' || key === 'vulns') return;
+        const exp = result.exploitation;
+        if (!exp) return;
+        const cvss   = exp.cvss || (result.status === 'FAIL' ? 7.0 : 4.0);
+        const sevKey = cvss >= 9 ? 'critique' : cvss >= 7 ? 'eleve' : cvss >= 4 ? 'moyen' : 'faible';
+        const sevLbl = { critique: 'CRITIQUE', eleve: 'ÉLEVÉ', moyen: 'MOYEN', faible: 'FAIBLE' }[sevKey];
+        improvements.push({ key, name: NAMES[key] || key, cvss, sevKey, sevLbl, exp });
+      });
+      improvements.sort((a, b) => b.cvss - a.cvss);
+    }
+
+    const improvList    = document.getElementById('improvementsList');
+    const improvSection = document.getElementById('improvSection');
+    const improvCount   = document.getElementById('improvCount');
+    const allClear      = document.getElementById('allClearMsg');
+
+    if (improvList) {
+      improvList.innerHTML = '';
+      improvements.forEach(({ name, cvss, sevKey, sevLbl, exp }) => {
+        const card = document.createElement('div');
+        card.className = `improv-card improv-card--${sevKey}`;
+        const toolsHtml = (exp.tools || []).map(t => `<span class="tool-tag">${escHtml(t)}</span>`).join('');
+        card.innerHTML = `
+          <div class="improv-header">
+            <span class="improv-severity improv-severity--${sevKey}">${escHtml(sevLbl)}</span>
+            <span class="improv-title">${escHtml(name)}</span>
+            <span class="improv-cvss">CVSS ${cvss.toFixed(1)}</span>
+          </div>
+          <p class="improv-desc">${escHtml(exp.description || '')}</p>
+          ${exp.impact      ? `<div class="improv-impact">${escHtml(exp.impact)}</div>`      : ''}
+          ${exp.remediation ? `<div class="improv-fix">${escHtml(exp.remediation)}</div>`   : ''}
+          ${toolsHtml ? `<div class="improv-tools">${toolsHtml}</div>` : ''}
+        `;
+        improvList.appendChild(card);
+      });
+    }
+
+    if (improvSection) improvSection.hidden = improvements.length === 0;
+    if (improvCount)   improvCount.textContent = String(improvements.length);
+    if (allClear)      allClear.hidden = improvements.length > 0;
+
+    reportSection.hidden = false;
+    setTimeout(() => reportSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+  }
+
+  // ── Backend scan + polling ─────────────────────────────────────────────────
+  async function runBackendScan(targetUrl) {
+    try {
+      writeLine('<span class="mono-dim"># Initializing backend scan...</span>');
+
+      const createRes = await fetch(API_URL + '/api/scan', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ targetUrl }),
+      });
+
+      if (!createRes.ok) {
+        const err = await createRes.json();
+        throw new Error(err.error || 'Scan initialization failed');
+      }
+
+      const { scanId } = await createRes.json();
+      writeLine(`<span class="mono-dim"># Scan ID: ${escHtml(scanId)}</span>`);
+
+      let lastLen = 0;
+      return new Promise((resolve, reject) => {
+        const poll = setInterval(async () => {
+          try {
+            const pollRes = await fetch(API_URL + '/api/scan/' + scanId);
+            if (!pollRes.ok) throw new Error('Poll failed');
+            const j = await pollRes.json();
+
+            if (j.lines && j.lines.length > lastLen) {
+              for (let i = lastLen; i < j.lines.length; i++) writeLine(j.lines[i]);
+              lastLen = j.lines.length;
+            }
+
+            if (j.status === 'done') {
+              clearInterval(poll);
+              writeLine('<span class="mono-dim"># Scan completed ✓</span>');
+              buildReport(mapResultsToStatus(j.results), j.results, j);
+              resolve(true);
+            } else if (j.status === 'error') {
+              clearInterval(poll);
+              writeLine(`<span class="mono-intense-red"># Scan error: ${escHtml(j.results?.error)}</span>`);
+              reject(new Error(j.results?.error || 'Unknown error'));
+            }
+          } catch (e) {
+            clearInterval(poll);
+            writeLine(`<span class="mono-intense-red"># Connection error: ${escHtml(e.message)}</span>`);
+            reject(e);
+          }
+        }, POLL_INTERVAL);
+
+        setTimeout(() => { clearInterval(poll); reject(new Error('Scan timeout (5 minutes)')); }, 300000);
+      });
+    } catch (e) {
+      writeLine(`<span class="mono-intense-red"># Backend error: ${escHtml(e.message)}</span>`);
+      throw e;
+    }
+  }
+
+  // ── Form submit ────────────────────────────────────────────────────────────
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const url = (input && input.value || '').trim();
+    try {
+      if (!url) throw new Error('empty');
+      const normalized = url.startsWith('http') ? url : 'https://' + url;
+      new URL(normalized);
+
+      resetTerminal(`probe ${normalized} --modules all --deep`);
+      const reportSection = document.getElementById('fullReport');
+      if (reportSection) reportSection.hidden = true;
+
+      runBackendScan(normalized).catch(err => {
+        console.error('Scan error:', err);
+        writeLine(`<span class="mono-intense-red"># ERROR: ${escHtml(err.message)}</span>`);
+      });
+    } catch (_) {
+      alert('Veuillez saisir une URL valide (ex: https://example.com)');
+      if (input) input.focus();
+    }
+  });
 })();
 
-// Intersection Observer for reveal animations
+// ── Reveal on scroll ───────────────────────────────────────────────────────────
 (function revealOnScroll() {
-	var els = Array.prototype.slice.call(document.querySelectorAll('.reveal'));
-	if (!('IntersectionObserver' in window) || els.length === 0) {
-		els.forEach(function (el) { el.classList.add('is-visible'); });
-		return;
-	}
-	var io = new IntersectionObserver(function (entries) {
-		entries.forEach(function (entry) {
-			if (entry.isIntersecting) {
-				entry.target.classList.add('is-visible');
-				io.unobserve(entry.target);
-			}
-		});
-	}, { threshold: 0.15 });
-	els.forEach(function (el) { io.observe(el); });
+  const els = Array.prototype.slice.call(document.querySelectorAll('.reveal'));
+  if (!('IntersectionObserver' in window) || els.length === 0) {
+    els.forEach(function (el) { el.classList.add('is-visible'); });
+    return;
+  }
+  const io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) { entry.target.classList.add('is-visible'); io.unobserve(entry.target); }
+    });
+  }, { threshold: 0.15 });
+  els.forEach(function (el) { io.observe(el); });
 })();

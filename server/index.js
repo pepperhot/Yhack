@@ -70,7 +70,7 @@ app.use(cors({
         if (!origin || corsOrigins.includes(origin)) cb(null, true);
         else cb(new Error('CORS not allowed'));
       }
-    : false, // same-origin only when frontend is served by this Express server
+    : true, // reflect origin — works behind nginx, Docker, or direct access
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
