@@ -128,18 +128,27 @@
     if (modulesGrid) {
       modulesGrid.innerHTML = '';
       MODULE_META.forEach(({ key, label, note }) => {
-        const st = statuses[key];
+        const st  = statuses[key];
         if (!st) return;
         const cls   = st === 'OK' ? 'ok' : st === 'WARN' ? 'warn' : 'fail';
         const badge = st === 'OK' ? '✓ OK' : st === 'WARN' ? '⚠ WARN' : '✗ FAIL';
         const div   = document.createElement('div');
         div.className = `module-card module-card--${cls}`;
+        const hasExploit = cls !== 'ok' && fullResults?.[key]?.exploitation;
         div.innerHTML = `
+          ${hasExploit ? `<button class="info-btn" data-key="${escHtml(key)}" title="Voir pourquoi &amp; comment exploiter" aria-label="Détails d'exploitation pour ${escHtml(label)}">i</button>` : ''}
           <div class="module-card__name">${escHtml(label)}</div>
           <div class="module-card__status module-card__status--${cls}">${badge}</div>
           <div class="module-card__note">${escHtml(note)}</div>
         `;
         modulesGrid.appendChild(div);
+      });
+
+      // Delegated click for all info buttons in this grid
+      modulesGrid.addEventListener('click', function (e) {
+        const btn = e.target.closest('.info-btn');
+        if (!btn) return;
+        showInfoModal(btn.dataset.key, MODULE_META, fullResults);
       });
     }
 
@@ -209,6 +218,109 @@
 
     reportSection.hidden = false;
     setTimeout(() => reportSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+  }
+
+  // ── Info Modal ─────────────────────────────────────────────────────────────
+  const infoModal        = document.getElementById('infoModal');
+  const infoModalClose   = document.getElementById('infoModalClose');
+  const infoModalBackdrop = document.getElementById('infoModalBackdrop');
+
+  function closeInfoModal() {
+    if (infoModal) infoModal.hidden = true;
+  }
+
+  if (infoModalClose)   infoModalClose.addEventListener('click', closeInfoModal);
+  if (infoModalBackdrop) infoModalBackdrop.addEventListener('click', closeInfoModal);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeInfoModal();
+  });
+
+  function showInfoModal(key, moduleMeta, results) {
+    if (!infoModal) return;
+    const exp  = results?.[key]?.exploitation;
+    if (!exp) return;
+
+    const meta  = moduleMeta.find(function (m) { return m.key === key; });
+    const label = meta ? meta.label : key;
+
+    const cvss   = exp.cvss || (results[key].status === 'FAIL' ? 7.0 : 4.0);
+    const sevKey = cvss >= 9 ? 'critique' : cvss >= 7 ? 'eleve' : cvss >= 4 ? 'moyen' : 'faible';
+    const sevLbl = { critique: 'CRITIQUE', eleve: 'ÉLEVÉ', moyen: 'MOYEN', faible: 'FAIBLE' }[sevKey];
+
+    const desc = exp.description ||
+      (exp.missing_headers && exp.missing_headers.length
+        ? exp.missing_headers.length + ' en-tête(s) de sécurité critique(s) absents.'
+        : '');
+
+    // Code blocks
+    const CODE_FIELDS = [
+      { field: 'example',      label: 'Exemple' },
+      { field: 'manual',       label: 'Manuel' },
+      { field: 'reverse_shell',label: 'Reverse shell' },
+      { field: 'log_poisoning',label: 'Log poisoning' },
+      { field: 'web_shell',    label: 'Web shell' },
+      { field: 'beef_hook',    label: 'BeEF hook' },
+      { field: 'phishing',     label: 'Phishing URL' },
+      { field: 'oauth_abuse',  label: 'Abus OAuth' },
+      { field: 'math_proof',   label: 'Preuve d\'évaluation' },
+      { field: 'rce_payload',  label: 'Payload RCE' },
+    ];
+
+    let codesHtml = '';
+    CODE_FIELDS.forEach(function (cf) {
+      if (exp[cf.field]) {
+        codesHtml += '<div class="info-code-block">' +
+          '<div class="info-code-label">' + escHtml(cf.label) + '</div>' +
+          '<pre class="info-code">' + escHtml(exp[cf.field]) + '</pre>' +
+          '</div>';
+      }
+    });
+
+    // Missing headers (special case for headers module)
+    let headersHtml = '';
+    if (exp.missing_headers && exp.missing_headers.length) {
+      headersHtml = '<div class="info-missing-headers">';
+      exp.missing_headers.forEach(function (h) {
+        const sev = h.severity === 'HIGH' ? 'eleve' : h.severity === 'MEDIUM' ? 'moyen' : 'faible';
+        headersHtml +=
+          '<div class="info-header-row">' +
+            '<span class="improv-severity improv-severity--' + sev + '">' + escHtml(h.severity) + '</span>' +
+            '<span class="info-header-name">' + escHtml(h.header) + '</span>' +
+            '<span class="info-header-scenario">' + escHtml(h.scenario || '') + '</span>' +
+          '</div>';
+      });
+      headersHtml += '</div>';
+    }
+
+    // Info leakage (headers module)
+    if (exp.info_leakage && exp.info_leakage.length) {
+      exp.info_leakage.forEach(function (l) {
+        codesHtml += '<div class="info-code-block">' +
+          '<div class="info-code-label">Disclosure : ' + escHtml(l.header) + '</div>' +
+          '<pre class="info-code">' + escHtml(l.header + ': ' + l.value) + '</pre>' +
+          '</div>';
+      });
+    }
+
+    const toolsHtml = (exp.tools || [])
+      .map(function (t) { return '<span class="tool-tag">' + escHtml(t) + '</span>'; })
+      .join('');
+
+    document.getElementById('infoModalContent').innerHTML =
+      '<div class="info-modal-header">' +
+        '<span class="improv-severity improv-severity--' + sevKey + '">' + escHtml(sevLbl) + '</span>' +
+        '<span class="info-modal-title">' + escHtml(label) + '</span>' +
+        (cvss ? '<span class="improv-cvss">CVSS&nbsp;' + cvss.toFixed(1) + '</span>' : '') +
+      '</div>' +
+      (desc ? '<p class="improv-desc info-modal-desc">' + escHtml(desc) + '</p>' : '') +
+      headersHtml +
+      codesHtml +
+      (exp.impact      ? '<div class="improv-impact">' + escHtml(exp.impact) + '</div>'      : '') +
+      (exp.remediation ? '<div class="improv-fix">'    + escHtml(exp.remediation) + '</div>' : '') +
+      (toolsHtml       ? '<div class="improv-tools">'  + toolsHtml + '</div>'                : '');
+
+    infoModal.hidden = false;
+    infoModal.focus();
   }
 
   // ── Backend scan + polling ─────────────────────────────────────────────────

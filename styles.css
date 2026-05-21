@@ -228,7 +228,80 @@ body {
 .all-clear strong { color: var(--primary); font-size: 16px; display: block; }
 .all-clear p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 
-/* Tooltip */
+/* ─── Module card info button ──────────────────────────────────────────────── */
+.module-card { position: relative; }
+
+.info-btn {
+  position: absolute; top: 8px; right: 8px;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.07);
+  color: var(--muted); font-size: 12px; font-style: italic;
+  font-family: Georgia, serif; font-weight: 700;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  line-height: 1; padding: 0;
+}
+.info-btn:hover, .info-btn:focus-visible {
+  background: rgba(0,229,255,0.18);
+  color: var(--accent);
+  border-color: rgba(0,229,255,0.45);
+  outline: none;
+}
+.module-card--warn .info-btn:hover { background: rgba(255,209,102,0.15); color: var(--warning); border-color: rgba(255,209,102,0.4); }
+.module-card--fail .info-btn:hover { background: rgba(255,92,138,0.15);  color: var(--danger);  border-color: rgba(255,92,138,0.4);  }
+
+/* ─── Info modal ─────────────────────────────────────────────────────────── */
+.info-modal {
+  position: fixed; inset: 0; z-index: 900;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.info-modal__backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(6px);
+}
+.info-modal__box {
+  position: relative; z-index: 1;
+  background: #0d1221; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 18px; padding: 28px 28px 24px;
+  max-width: 620px; width: 100%;
+  max-height: 85vh; overflow-y: auto;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+}
+.info-modal__close {
+  position: absolute; top: 14px; right: 16px;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+  color: var(--muted); border-radius: 8px;
+  width: 28px; height: 28px; font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.info-modal__close:hover { background: rgba(255,92,138,0.15); color: var(--danger); border-color: rgba(255,92,138,0.4); }
+
+.info-modal-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
+  padding-right: 36px;
+}
+.info-modal-title { font-size: 17px; font-weight: 700; color: var(--text); }
+.info-modal-desc  { margin: 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+.info-code-block  { margin-bottom: 12px; }
+.info-code-label  { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; font-family: "IBM Plex Mono", monospace; }
+.info-code {
+  background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; padding: 12px 14px;
+  font-family: "IBM Plex Mono", monospace; font-size: 12px; color: #a8ff78;
+  white-space: pre-wrap; word-break: break-all; margin: 0; line-height: 1.55;
+  overflow-x: auto;
+}
+
+.info-missing-headers { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.info-header-row      { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.info-header-name     { font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 700; color: var(--text); }
+.info-header-scenario { font-size: 12px; color: var(--muted); line-height: 1.4; flex: 1 1 200px; }
+
+/* Tooltip (legacy, kept for compatibility) */
 .info-icon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 50%;
