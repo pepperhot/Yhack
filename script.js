@@ -343,12 +343,16 @@
       writeLine(`<span class="mono-dim"># Scan ID: ${escHtml(scanId)}</span>`);
 
       let lastLen = 0;
+      let pollErrors = 0;
+      const MAX_POLL_ERRORS = 5;
+
       return new Promise((resolve, reject) => {
         const poll = setInterval(async () => {
           try {
             const pollRes = await fetch(API_URL + '/api/scan/' + scanId);
-            if (!pollRes.ok) throw new Error('Poll failed');
+            if (!pollRes.ok) throw new Error('Poll failed (' + pollRes.status + ')');
             const j = await pollRes.json();
+            pollErrors = 0; // reset on success
 
             if (j.lines && j.lines.length > lastLen) {
               for (let i = lastLen; i < j.lines.length; i++) writeLine(j.lines[i]);
@@ -358,7 +362,12 @@
             if (j.status === 'done') {
               clearInterval(poll);
               writeLine('<span class="mono-dim"># Scan completed ✓</span>');
-              buildReport(mapResultsToStatus(j.results), j.results, j);
+              try {
+                buildReport(mapResultsToStatus(j.results), j.results, j);
+              } catch (reportErr) {
+                console.error('buildReport error:', reportErr);
+                writeLine('<span class="mono-intense-red"># Erreur lors de la génération du rapport</span>');
+              }
               resolve(true);
             } else if (j.status === 'error') {
               clearInterval(poll);
@@ -366,9 +375,13 @@
               reject(new Error(j.results?.error || 'Unknown error'));
             }
           } catch (e) {
-            clearInterval(poll);
-            writeLine(`<span class="mono-intense-red"># Connection error: ${escHtml(e.message)}</span>`);
-            reject(e);
+            pollErrors++;
+            if (pollErrors >= MAX_POLL_ERRORS) {
+              clearInterval(poll);
+              writeLine(`<span class="mono-intense-red"># Connection lost after ${MAX_POLL_ERRORS} retries: ${escHtml(e.message)}</span>`);
+              reject(e);
+            }
+            // else: ignore transient error, keep polling
           }
         }, POLL_INTERVAL);
 
