@@ -256,6 +256,7 @@ body {
   position: fixed; inset: 0; z-index: 900;
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
+.info-modal[hidden] { display: none !important; }
 .info-modal__backdrop {
   position: absolute; inset: 0;
   background: rgba(0,0,0,0.72);
