@@ -25,20 +25,18 @@
     .then(data => { if (data?.user) showApp(data.user); else showAuth(); })
     .catch(() => showAuth());
 
-  // Tab switching
-  document.querySelectorAll('.auth-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const t = tab.dataset.tab;
-      document.querySelectorAll('.auth-tab').forEach(b => {
-        b.classList.toggle('auth-tab--active', b.dataset.tab === t);
-        b.setAttribute('aria-selected', String(b.dataset.tab === t));
-      });
-      const lf = document.getElementById('loginForm');
-      const rf = document.getElementById('registerForm');
-      if (lf) lf.hidden = t !== 'login';
-      if (rf) rf.hidden = t !== 'register';
-      document.getElementById(t === 'login' ? 'loginError' : 'registerError').hidden = true;
-    });
+  // Sliding panel switching
+  const container = document.getElementById('authContainer');
+  function setMode(mode) {
+    if (!container) return;
+    container.classList.toggle('is-register', mode === 'register');
+    const errLogin = document.getElementById('loginError');
+    const errReg   = document.getElementById('registerError');
+    if (errLogin) errLogin.hidden = true;
+    if (errReg)   errReg.hidden   = true;
+  }
+  document.querySelectorAll('[data-switch]').forEach(btn => {
+    btn.addEventListener('click', () => setMode(btn.dataset.switch));
   });
 
   // Login
