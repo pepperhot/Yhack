@@ -547,15 +547,16 @@ body {
   align-items: center; justify-content: center;
   text-align: center; padding: 48px 40px;
   transition: opacity 0.25s 0.15s, transform 0.3s 0.1s;
+  pointer-events: none; /* désactivé par défaut pour toutes les faces */
 }
-/* Face A : visible quand login (panneau à droite) */
-.auth-panel__face--a { opacity: 1; transform: translateX(0); }
-/* Face B : cachée quand login */
+/* Face A : visible + cliquable quand login (panneau à droite) */
+.auth-panel__face--a { opacity: 1; transform: translateX(0); pointer-events: auto; }
+/* Face B : cachée et non-cliquable quand login */
 .auth-panel__face--b { opacity: 0; transform: translateX(24px); }
 
 /* Swap des faces lors du passage en register */
-.auth-container.is-register .auth-panel__face--a { opacity: 0; transform: translateX(-24px); }
-.auth-container.is-register .auth-panel__face--b { opacity: 1; transform: translateX(0); }
+.auth-container.is-register .auth-panel__face--a { opacity: 0; transform: translateX(-24px); pointer-events: none; }
+.auth-container.is-register .auth-panel__face--b { opacity: 1; transform: translateX(0); pointer-events: auto; }
 
 .auth-panel__face svg {
   margin-bottom: 20px;
