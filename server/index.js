@@ -3,11 +3,13 @@
 require('dotenv').config();
 const express   = require('express');
 const cors      = require('cors');
+const session   = require('express-session');
 const path      = require('path');
 const os        = require('os');
 const { nanoid } = require('nanoid');
 const rateLimit  = require('express-rate-limit');
-const { runScan } = require('./scanManager');
+const { runScan }    = require('./scanManager');
+const { createUser, loginUser } = require('./auth');
 
 const app      = express();
 const PORT     = process.env.PORT || 5050;
@@ -59,6 +61,23 @@ function cleanupOldScans() {
   }
 }
 
+// ─── Session ─────────────────────────────────────────────────────────────────
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'yhack-dev-secret-change-in-prod',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: NODE_ENV === 'production',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  },
+}));
+
+function requireAuth(req, res, next) {
+  if (!req.session?.user) return res.status(401).json({ error: 'Non authentifié' });
+  next();
+}
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
@@ -75,6 +94,45 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '../')));
+
+// ─── Auth routes ─────────────────────────────────────────────────────────────
+app.post('/api/auth/register', (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ error: 'Email invalide' });
+    const user = createUser(email, password);
+    req.session.user = user;
+    res.json({ user });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
+    const user = loginUser(email, password);
+    req.session.user = user;
+    res.json({ user });
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.clearCookie('connect.sid');
+    res.json({ ok: true });
+  });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  if (!req.session?.user) return res.status(401).json({ error: 'Non authentifié' });
+  res.json({ user: req.session.user });
+});
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 const scanLimiter = rateLimit({
@@ -118,7 +176,7 @@ function validateURL(targetUrl) {
 }
 
 // ─── POST /api/scan ───────────────────────────────────────────────────────────
-app.post('/api/scan', scanLimiter, async (req, res) => {
+app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
   try {
     const { targetUrl, email } = req.body || {};
 

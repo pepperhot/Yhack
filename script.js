@@ -1,5 +1,123 @@
 'use strict';
 
+// ── Auth ───────────────────────────────────────────────────────────────────────
+(function auth() {
+  const API      = window.location.origin;
+  const overlay  = document.getElementById('authOverlay');
+  const navUser  = document.getElementById('navUser');
+  const emailEl  = document.getElementById('navUserEmail');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  function showApp(user) {
+    if (overlay)  overlay.hidden = true;
+    if (navUser)  navUser.hidden = false;
+    if (emailEl)  emailEl.textContent = user.email;
+  }
+
+  function showAuth() {
+    if (overlay)  overlay.hidden = false;
+    if (navUser)  navUser.hidden = true;
+  }
+
+  // Check existing session on load
+  fetch(API + '/api/auth/me', { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => { if (data?.user) showApp(data.user); else showAuth(); })
+    .catch(() => showAuth());
+
+  // Tab switching
+  document.querySelectorAll('.auth-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const t = tab.dataset.tab;
+      document.querySelectorAll('.auth-tab').forEach(b => {
+        b.classList.toggle('auth-tab--active', b.dataset.tab === t);
+        b.setAttribute('aria-selected', String(b.dataset.tab === t));
+      });
+      const lf = document.getElementById('loginForm');
+      const rf = document.getElementById('registerForm');
+      if (lf) lf.hidden = t !== 'login';
+      if (rf) rf.hidden = t !== 'register';
+      document.getElementById(t === 'login' ? 'loginError' : 'registerError').hidden = true;
+    });
+  });
+
+  // Login
+  const loginForm = document.getElementById('loginForm');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const email    = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const errEl    = document.getElementById('loginError');
+      const btn      = loginForm.querySelector('button[type="submit"]');
+      errEl.hidden   = true;
+      btn.disabled   = true;
+      btn.textContent = 'Connexion…';
+      try {
+        const res  = await fetch(API + '/api/auth/login', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Connexion échouée');
+        showApp(data.user);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.hidden = false;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Se connecter';
+      }
+    });
+  }
+
+  // Register
+  const registerForm = document.getElementById('registerForm');
+  if (registerForm) {
+    registerForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const email    = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+      const confirm  = document.getElementById('regConfirm').value;
+      const errEl    = document.getElementById('registerError');
+      const btn      = registerForm.querySelector('button[type="submit"]');
+      errEl.hidden   = true;
+      if (password !== confirm) {
+        errEl.textContent = 'Les mots de passe ne correspondent pas';
+        errEl.hidden = false;
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Création…';
+      try {
+        const res  = await fetch(API + '/api/auth/register', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Inscription échouée');
+        showApp(data.user);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.hidden = false;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Créer mon compte';
+      }
+    });
+  }
+
+  // Logout
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      await fetch(API + '/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+      showAuth();
+    });
+  }
+})();
+
 (function setYear() {
   const yearEl = document.getElementById('year');
   if (yearEl) yearEl.textContent = String(new Date().getFullYear());

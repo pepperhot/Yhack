@@ -28,6 +28,10 @@
         <a href="#contact">Contact</a>
         <a class="btn btn--ghost" href="#scan">Lancer un scan</a>
       </nav>
+      <div class="nav-user" id="navUser" hidden>
+        <span class="nav-user-email" id="navUserEmail"></span>
+        <button class="btn btn--ghost btn--sm" id="logoutBtn" type="button">Déconnexion</button>
+      </div>
     </header>
 
     <main>
@@ -211,6 +215,55 @@
       <div class="info-modal__box">
         <button class="info-modal__close" id="infoModalClose" aria-label="Fermer">✕</button>
         <div id="infoModalContent"></div>
+      </div>
+    </div>
+
+    <!-- Auth Overlay -->
+    <div id="authOverlay" class="auth-overlay" role="dialog" aria-modal="true" aria-label="Authentification Yhack">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2l7 4v5c0 5-3.6 9.4-7 11-3.4-1.6-7-6-7-11V6l7-4z" stroke="#00FFA3" stroke-width="1.5" fill="rgba(0,255,163,0.08)"/>
+            <path d="M8 11l3 3 5-5" stroke="#00E5FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="auth-brand-name">Yhack</span>
+        </div>
+        <p class="auth-sub">Scanner de sécurité web professionnel</p>
+
+        <div class="auth-tabs" role="tablist">
+          <button class="auth-tab auth-tab--active" data-tab="login" type="button" role="tab" aria-selected="true">Connexion</button>
+          <button class="auth-tab" data-tab="register" type="button" role="tab" aria-selected="false">Créer un compte</button>
+        </div>
+
+        <form id="loginForm" class="auth-form" novalidate>
+          <div class="auth-field">
+            <label for="loginEmail">Email</label>
+            <input id="loginEmail" type="email" autocomplete="email" placeholder="vous@exemple.com" required />
+          </div>
+          <div class="auth-field">
+            <label for="loginPassword">Mot de passe</label>
+            <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required />
+          </div>
+          <div id="loginError" class="auth-error" hidden role="alert"></div>
+          <button type="submit" class="btn btn--primary auth-submit">Se connecter</button>
+        </form>
+
+        <form id="registerForm" class="auth-form" hidden novalidate>
+          <div class="auth-field">
+            <label for="regEmail">Email</label>
+            <input id="regEmail" type="email" autocomplete="email" placeholder="vous@exemple.com" required />
+          </div>
+          <div class="auth-field">
+            <label for="regPassword">Mot de passe</label>
+            <input id="regPassword" type="password" autocomplete="new-password" placeholder="8 caractères minimum" required minlength="8" />
+          </div>
+          <div class="auth-field">
+            <label for="regConfirm">Confirmer le mot de passe</label>
+            <input id="regConfirm" type="password" autocomplete="new-password" placeholder="••••••••" required />
+          </div>
+          <div id="registerError" class="auth-error" hidden role="alert"></div>
+          <button type="submit" class="btn btn--primary auth-submit">Créer mon compte</button>
+        </form>
       </div>
     </div>
 
