@@ -68,7 +68,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: NODE_ENV === 'production',
+    secure: process.env.COOKIE_SECURE === 'true', // set COOKIE_SECURE=true only with HTTPS
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   },
 }));
