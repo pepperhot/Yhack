@@ -221,49 +221,83 @@
     <!-- Auth Overlay -->
     <div id="authOverlay" class="auth-overlay" role="dialog" aria-modal="true" aria-label="Authentification Yhack">
       <div class="auth-card">
-        <div class="auth-brand">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 2l7 4v5c0 5-3.6 9.4-7 11-3.4-1.6-7-6-7-11V6l7-4z" stroke="#00FFA3" stroke-width="1.5" fill="rgba(0,255,163,0.08)"/>
-            <path d="M8 11l3 3 5-5" stroke="#00E5FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span class="auth-brand-name">Yhack</span>
+
+        <div class="auth-header">
+          <div class="auth-brand">
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 2l7 4v5c0 5-3.6 9.4-7 11-3.4-1.6-7-6-7-11V6l7-4z" stroke="#00FFA3" stroke-width="1.5" fill="rgba(0,255,163,0.1)"/>
+              <path d="M8 11l3 3 5-5" stroke="#00E5FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="auth-brand-name">Yhack</span>
+          </div>
+          <p class="auth-sub">Accès réservé — authentifiez-vous pour continuer</p>
         </div>
-        <p class="auth-sub">Scanner de sécurité web professionnel</p>
 
         <div class="auth-tabs" role="tablist">
           <button class="auth-tab auth-tab--active" data-tab="login" type="button" role="tab" aria-selected="true">Connexion</button>
           <button class="auth-tab" data-tab="register" type="button" role="tab" aria-selected="false">Créer un compte</button>
         </div>
 
+        <!-- Login -->
         <form id="loginForm" class="auth-form" novalidate>
+
           <div class="auth-field">
-            <label for="loginEmail">Email</label>
+            <label for="loginEmail">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke="currentColor" stroke-width="1.8"/><path d="M22 6l-10 7L2 6" stroke="currentColor" stroke-width="1.8"/></svg>
+              Adresse email
+            </label>
             <input id="loginEmail" type="email" autocomplete="email" placeholder="vous@exemple.com" required />
           </div>
+
           <div class="auth-field">
-            <label for="loginPassword">Mot de passe</label>
+            <label for="loginPassword">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-width="1.8"/></svg>
+              Mot de passe
+            </label>
             <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required />
           </div>
+
           <div id="loginError" class="auth-error" hidden role="alert"></div>
-          <button type="submit" class="btn btn--primary auth-submit">Se connecter</button>
+          <button type="submit" class="btn btn--primary auth-submit">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2l7 4v5c0 5-3.6 9.4-7 11-3.4-1.6-7-6-7-11V6l7-4z" stroke="currentColor" stroke-width="2"/></svg>
+            Se connecter
+          </button>
         </form>
 
+        <!-- Register -->
         <form id="registerForm" class="auth-form" hidden novalidate>
+
           <div class="auth-field">
-            <label for="regEmail">Email</label>
+            <label for="regEmail">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke="currentColor" stroke-width="1.8"/><path d="M22 6l-10 7L2 6" stroke="currentColor" stroke-width="1.8"/></svg>
+              Adresse email
+            </label>
             <input id="regEmail" type="email" autocomplete="email" placeholder="vous@exemple.com" required />
           </div>
+
           <div class="auth-field">
-            <label for="regPassword">Mot de passe</label>
+            <label for="regPassword">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-width="1.8"/></svg>
+              Mot de passe
+            </label>
             <input id="regPassword" type="password" autocomplete="new-password" placeholder="8 caractères minimum" required minlength="8" />
           </div>
+
           <div class="auth-field">
-            <label for="regConfirm">Confirmer le mot de passe</label>
+            <label for="regConfirm">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/></svg>
+              Confirmer le mot de passe
+            </label>
             <input id="regConfirm" type="password" autocomplete="new-password" placeholder="••••••••" required />
           </div>
+
           <div id="registerError" class="auth-error" hidden role="alert"></div>
-          <button type="submit" class="btn btn--primary auth-submit">Créer mon compte</button>
+          <button type="submit" class="btn btn--primary auth-submit">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/><path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="2"/></svg>
+            Créer mon compte
+          </button>
         </form>
+
       </div>
     </div>
 
