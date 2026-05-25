@@ -18,7 +18,7 @@ services:
   yhack:
     build: .
     ports:
-      - "80:5050"
+      - "3000:5050"
     restart: unless-stopped
     depends_on:
       postgres:
