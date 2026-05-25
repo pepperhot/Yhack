@@ -8,6 +8,7 @@ const path      = require('path');
 const os        = require('os');
 const { nanoid } = require('nanoid');
 const rateLimit  = require('express-rate-limit');
+const { pool, init } = require('./db');
 const { runScan }    = require('./scanManager');
 const { createUser, loginUser } = require('./auth');
 
@@ -15,10 +16,12 @@ const app      = express();
 const PORT     = process.env.PORT || 5050;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// ─── In-memory scan store (no native SQLite dependency) ───────────────────────
-const scans = new Map(); // scanId → scan object
+// ─── Scan store ───────────────────────────────────────────────────────────────
+// Active scans stay in memory for real-time line streaming.
+// On completion they are flushed to PostgreSQL and evicted after 60 s.
+const activeScans = new Map();
 
-function createScan(id, target, email) {
+async function createScan(id, target, email) {
   const scan = {
     id,
     target,
@@ -30,34 +33,47 @@ function createScan(id, target, email) {
     completed_at: null,
     duration_ms:  null,
   };
-  scans.set(id, scan);
+  activeScans.set(id, scan);
+  await pool.query(
+    'INSERT INTO scans (id, target, email, status) VALUES ($1, $2, $3, $4)',
+    [id, target, email || null, 'queued'],
+  );
   return scan;
 }
 
-function getScan(id) {
-  return scans.get(id) || null;
+async function getScan(id) {
+  if (activeScans.has(id)) return activeScans.get(id);
+
+  const { rows } = await pool.query('SELECT * FROM scans WHERE id = $1', [id]);
+  if (!rows[0]) return null;
+  const r = rows[0];
+  return {
+    id:           r.id,
+    target:       r.target,
+    email:        r.email,
+    status:       r.status,
+    results:      r.results,
+    lines:        r.lines || [],
+    created_at:   r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+    completed_at: r.completed_at instanceof Date ? r.completed_at.toISOString() : r.completed_at,
+    duration_ms:  r.duration_ms,
+  };
 }
 
-function updateScan(id, fields) {
-  const scan = scans.get(id);
+async function updateScan(id, fields) {
+  const scan = activeScans.get(id);
   if (scan) Object.assign(scan, fields);
-}
 
-// Cleanup: remove scans older than TTL
-function cleanupOldScans() {
-  const maxScans = parseInt(process.env.MAX_SCANS_MEMORY || '500');
-  const ttlHours = Number.isFinite(parseInt(process.env.SCAN_TTL_HOURS))
-    ? parseInt(process.env.SCAN_TTL_HOURS) : 24;
-  const cutoff = Date.now() - ttlHours * 3600 * 1000;
-
-  for (const [id, scan] of scans.entries()) {
-    if (new Date(scan.created_at).getTime() < cutoff) scans.delete(id);
-  }
-  // Hard cap
-  if (scans.size > maxScans) {
-    const sorted = [...scans.entries()].sort((a, b) =>
-      new Date(a[1].created_at) - new Date(b[1].created_at));
-    sorted.slice(0, scans.size - maxScans).forEach(([id]) => scans.delete(id));
+  if (fields.status === 'done' || fields.status === 'error') {
+    const s = scan || {};
+    await pool.query(
+      `UPDATE scans
+          SET status=$1, results=$2, lines=$3, completed_at=$4, duration_ms=$5
+        WHERE id=$6`,
+      [s.status, JSON.stringify(s.results), JSON.stringify(s.lines || []),
+       s.completed_at, s.duration_ms, id],
+    );
+    setTimeout(() => activeScans.delete(id), 60_000);
   }
 }
 
@@ -68,8 +84,8 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.COOKIE_SECURE === 'true', // set COOKIE_SECURE=true only with HTTPS
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    secure: process.env.COOKIE_SECURE === 'true',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   },
 }));
 
@@ -89,20 +105,20 @@ app.use(cors({
         if (!origin || corsOrigins.includes(origin)) cb(null, true);
         else cb(new Error('CORS not allowed'));
       }
-    : true, // reflect origin — works behind nginx, Docker, or direct access
+    : true,
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '../')));
 
 // ─── Auth routes ─────────────────────────────────────────────────────────────
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       return res.status(400).json({ error: 'Email invalide' });
-    const user = createUser(email, password);
+    const user = await createUser(email, password);
     req.session.user = user;
     res.json({ user });
   } catch (e) {
@@ -110,11 +126,11 @@ app.post('/api/auth/register', (req, res) => {
   }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
-    const user = loginUser(email, password);
+    const user = await loginUser(email, password);
     req.session.user = user;
     res.json({ user });
   } catch (e) {
@@ -192,27 +208,26 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
 
     const scanId    = nanoid(12);
     const startTime = Date.now();
-    createScan(scanId, url.href, email);
+    await createScan(scanId, url.href, email);
 
     console.log('[API] Scan started', { scanId, target: url.href });
 
-    // Fire-and-forget: scanManager writes lines directly via the db-like shim
     runScan(url, email, scanId, {
       prepare: () => ({
         get: (id) => {
-          const s = getScan(id);
+          const s = activeScans.get(id);
           return s ? { lines: JSON.stringify(s.lines) } : null;
         },
         run: (linesJson, id) => {
-          const s = getScan(id);
+          const s = activeScans.get(id);
           if (s) {
             try { s.lines = JSON.parse(linesJson); } catch (_) {}
           }
         },
       }),
     })
-      .then(results => {
-        updateScan(scanId, {
+      .then(async results => {
+        await updateScan(scanId, {
           status:       'done',
           results,
           duration_ms:  Date.now() - startTime,
@@ -220,8 +235,8 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
         });
         console.log('[API] Scan done', { scanId, duration: Date.now() - startTime + 'ms' });
       })
-      .catch(err => {
-        updateScan(scanId, {
+      .catch(async err => {
+        await updateScan(scanId, {
           status:       'error',
           results:      { error: err.message || String(err) },
           duration_ms:  Date.now() - startTime,
@@ -238,12 +253,12 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
 });
 
 // ─── GET /api/scan/:id ────────────────────────────────────────────────────────
-app.get('/api/scan/:id', (req, res) => {
+app.get('/api/scan/:id', async (req, res) => {
   const scanId = req.params.id;
   if (!/^[A-Za-z0-9_-]{12}$/.test(scanId))
     return res.status(400).json({ error: 'ID de scan invalide' });
 
-  const scan = getScan(scanId);
+  const scan = await getScan(scanId);
   if (!scan) return res.status(404).json({ error: 'Scan introuvable' });
 
   res.json({
@@ -259,23 +274,29 @@ app.get('/api/scan/:id', (req, res) => {
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('\n[API] Shutting down...');
+  await pool.end();
   process.exit(0);
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
-  cleanupOldScans();
+init()
+  .then(() => {
+    app.listen(PORT, '0.0.0.0', () => {
+      let myIp = 'localhost';
+      for (const ifaces of Object.values(os.networkInterfaces())) {
+        const ipv4 = (ifaces || []).find(i => i.family === 'IPv4' && !i.internal);
+        if (ipv4) { myIp = ipv4.address; break; }
+      }
 
-  let myIp = 'localhost';
-  for (const ifaces of Object.values(os.networkInterfaces())) {
-    const ipv4 = (ifaces || []).find(i => i.family === 'IPv4' && !i.internal);
-    if (ipv4) { myIp = ipv4.address; break; }
-  }
-
-  console.log(`\n[yhack] Serveur de sécurité démarré`);
-  console.log(`- Mode:   ${NODE_ENV}`);
-  console.log(`- Local:  http://localhost:${PORT}`);
-  console.log(`- Réseau: http://${myIp}:${PORT}\n`);
-});
+      console.log(`\n[yhack] Serveur de sécurité démarré`);
+      console.log(`- Mode:   ${NODE_ENV}`);
+      console.log(`- Local:  http://localhost:${PORT}`);
+      console.log(`- Réseau: http://${myIp}:${PORT}\n`);
+    });
+  })
+  .catch(err => {
+    console.error('[DB] Impossible de se connecter à PostgreSQL:', err.message);
+    process.exit(1);
+  });

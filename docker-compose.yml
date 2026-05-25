@@ -1,9 +1,32 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: yhack
+      POSTGRES_USER: yhack
+      POSTGRES_PASSWORD: yhack
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yhack"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   yhack:
     build: .
     ports:
       - "80:5050"
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       - NODE_ENV=production
       - PORT=5050
+      - DATABASE_URL=postgresql://yhack:yhack@postgres:5432/yhack
+
+volumes:
+  pgdata:
