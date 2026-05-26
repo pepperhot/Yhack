@@ -2,20 +2,20 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: yhack
-      POSTGRES_USER: yhack
-      POSTGRES_PASSWORD: yhack
+      POSTGRES_DB: netguard
+      POSTGRES_USER: netguard
+      POSTGRES_PASSWORD: netguard
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yhack"]
+      test: ["CMD-SHELL", "pg_isready -U netguard"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  yhack:
+  netguard:
     build: .
     ports:
       - "3000:5050"
@@ -26,7 +26,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5050
-      - DATABASE_URL=postgresql://yhack:yhack@postgres:5432/yhack
+      - DATABASE_URL=postgresql://netguard:netguard@postgres:5432/netguard
 
 volumes:
   pgdata:

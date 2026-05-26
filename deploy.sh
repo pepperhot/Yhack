@@ -14,4 +14,4 @@ echo "🧹 Nettoyage des images inutilisées..."
 docker image prune -f
 
 echo "✅ Déployé ! Logs :"
-docker compose logs --tail=20 yhack
+docker compose logs --tail=20 netguard

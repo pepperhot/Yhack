@@ -3,7 +3,7 @@
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://yhack:yhack@localhost:5432/yhack',
+  connectionString: process.env.DATABASE_URL || 'postgresql://netguard:netguard@localhost:5432/netguard',
   max: 10,
 });
 

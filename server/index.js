@@ -79,7 +79,7 @@ async function updateScan(id, fields) {
 
 // ─── Session ─────────────────────────────────────────────────────────────────
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'yhack-dev-secret-change-in-prod',
+  secret: process.env.SESSION_SECRET || 'netguard-dev-secret-change-in-prod',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -290,7 +290,7 @@ init()
         if (ipv4) { myIp = ipv4.address; break; }
       }
 
-      console.log(`\n[yhack] Serveur de sécurité démarré`);
+      console.log(`\n[netguard] Serveur de sécurité démarré`);
       console.log(`- Mode:   ${NODE_ENV}`);
       console.log(`- Local:  http://localhost:${PORT}`);
       console.log(`- Réseau: http://${myIp}:${PORT}\n`);

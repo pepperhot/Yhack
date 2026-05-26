@@ -1,5 +1,5 @@
 {
-  "name": "yhack-security",
+  "name": "netguard-security",
   "version": "1.0.0",
   "description": "Professional web security scanning tool",
   "private": true,
@@ -16,7 +16,7 @@
     "scanning",
     "penetration-testing"
   ],
-  "author": "Yhack Team",
+  "author": "NetGuard Team",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"

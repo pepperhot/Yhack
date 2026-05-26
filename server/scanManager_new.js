@@ -46,10 +46,10 @@ async function sendVulnerabilityAlert(email, vulnTitle, target, details) {
   try {
     log('INFO', 'EMAIL', `Sending alert to ${email}`);
     await transporter.sendMail({
-      from: process.env.ALERT_EMAIL_FROM || '"Yhack Scanner" <alert@yhack.local>',
+      from: process.env.ALERT_EMAIL_FROM || '"NetGuard Scanner" <alert@netguard.local>',
       to: email,
       subject: `[CRITICAL] Vulnerability on ${target}: ${vulnTitle}`,
-      text: `⚠️ SECURITY ALERT YHACK\n\nTarget: ${target}\nType: ${vulnTitle}\n\n${details}`
+      text: `⚠️ SECURITY ALERT NETGUARD\n\nTarget: ${target}\nType: ${vulnTitle}\n\n${details}`
     });
     log('SUCCESS', 'EMAIL', `Alert sent to ${email}`);
   } catch(e) {
@@ -141,7 +141,7 @@ async function testCORS(url, onLine, alertEmail) {
   onLine('▸ CORS Misconfiguration ...');
   try {
     const resp = await fetch(url.href, {
-      headers: { 'Origin': PAYLOADS.cors.testOrigin, 'User-Agent': 'Yhack-Scanner/1.0' },
+      headers: { 'Origin': PAYLOADS.cors.testOrigin, 'User-Agent': 'NetGuard-Scanner/1.0' },
       timeout: 5000
     });
 
@@ -358,7 +358,7 @@ async function testSSTI(url, onLine, alertEmail) {
         const text = await r.text();
 
         if ((payload === '${7*7}' && text.includes('49')) || 
-            (payload === "${'yhack'.upper()}" && text.includes('YHACK'))) {
+            (payload === "${'netguard'.upper()}" && text.includes('NETGUARD'))) {
           onLine(`  ! SSTI détectée sur '${param}'`);
           if (alertEmail) {
             await sendVulnerabilityAlert(alertEmail, 'TEMPLATE_INJECTION', url.href, 

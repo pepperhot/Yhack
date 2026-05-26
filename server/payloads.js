@@ -78,7 +78,7 @@ const PAYLOADS = {
   xss: {
     params: ['q', 's', 'search', 'name', 'msg', 'cmd', 'user', 'comment', 'feedback', 'text', 'query', 'keyword', 'term', 'data'],
     payloads: [
-      '<yhack>alert(1)</yhack>',
+      '<netguard>alert(1)</netguard>',
       '<script>alert(1)</script>',
       '<img src=x onerror=alert(1)>',
       '<svg onload=alert(1)>',
@@ -195,12 +195,12 @@ const PAYLOADS = {
       'returnUrl', 'forward', 'redir', 'redirectUrl', 'ref', 'referer', 'referral',
       'path', 'callback', 'next_url', 'redirect_to', 'back', 'location',
     ],
-    marker: 'evil.yhack.test',
+    marker: 'evil.netguard.test',
   },
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
   cors: {
-    testOrigin: 'https://evil.yhack.test',
+    testOrigin: 'https://evil.netguard.test',
   },
 
   // ─── Sensitive Files ──────────────────────────────────────────────────────
@@ -301,7 +301,7 @@ const PAYLOADS = {
   flagPatterns: [
     /HTB\{[^}]+\}/gi,
     /flag\{[^}]+\}/gi,
-    /YHACK\{[^}]+\}/gi,
+    /NETGUARD\{[^}]+\}/gi,
     /FLAG\{[^}]+\}/gi,
     /CTF\{[^}]+\}/gi,
   ],

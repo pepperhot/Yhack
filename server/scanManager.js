@@ -27,10 +27,10 @@ async function sendAlert(email, title, target, details) {
   if (!email || process.env.ENABLE_EMAIL_ALERTS !== 'true') return;
   try {
     await transporter.sendMail({
-      from:    process.env.ALERT_EMAIL_FROM || '"Yhack Scanner" <alert@yhack.local>',
+      from:    process.env.ALERT_EMAIL_FROM || '"NetGuard Scanner" <alert@netguard.local>',
       to:      email,
       subject: `[CRITICAL] ${title} on ${target}`,
-      text:    `⚠ YHACK SECURITY ALERT\n\nTarget: ${target}\nType: ${title}\n\n${details}`,
+      text:    `⚠ NETGUARD SECURITY ALERT\n\nTarget: ${target}\nType: ${title}\n\n${details}`,
     });
   } catch (e) {
     console.error('[EMAIL] Send failed:', e.message);
@@ -315,10 +315,10 @@ async function testHeaders(url, onLine) {
 async function testCORS(url, onLine, alertEmail) {
   onLine('▸ [CORS] Configuration Cross-Origin .............');
   try {
-    const evilOrigin = 'https://evil.yhack.test';
+    const evilOrigin = 'https://evil.netguard.test';
 
     const resp = await safeFetch(url.href, {
-      headers: { Origin: evilOrigin, 'User-Agent': 'Yhack-Scanner/1.0' },
+      headers: { Origin: evilOrigin, 'User-Agent': 'NetGuard-Scanner/1.0' },
       timeout: 5000,
     });
 
@@ -796,10 +796,10 @@ async function testSQLi(url, onLine, alertEmail) {
 async function testXSS(url, onLine, alertEmail) {
   onLine('▸ [XSS] Cross-Site Scripting .....................');
 
-  const canary = 'yhack' + Math.random().toString(36).substring(2, 6);
+  const canary = 'netguard' + Math.random().toString(36).substring(2, 6);
 
   for (const rawPayload of PAYLOADS.xss.payloads) {
-    const payload = rawPayload.replace('yhack', canary);
+    const payload = rawPayload.replace('netguard', canary);
 
     for (const param of PAYLOADS.xss.params.slice(0, 6)) {
       try {
@@ -890,7 +890,7 @@ async function testRCE(url, onLine, alertEmail) {
   onLine('▸ [RCE] Remote Code Execution ...................');
 
   // Use a canary string to avoid false positives from common words
-  const canary = 'yhackrce' + Math.random().toString(36).substring(2, 6);
+  const canary = 'netguardrce' + Math.random().toString(36).substring(2, 6);
 
   const payloads = [
     `; echo ${canary}`,

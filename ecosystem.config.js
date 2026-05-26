@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name:          'yhack',
+    name:          'netguard',
     script:        'server/index.js',
     cwd:           '/var/www/html/Yhack',
     watch:         false,
