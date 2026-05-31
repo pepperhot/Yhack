@@ -8,7 +8,7 @@ const path      = require('path');
 const os        = require('os');
 const { nanoid } = require('nanoid');
 const rateLimit  = require('express-rate-limit');
-const { pool, init } = require('./db');
+const { pool, init, isAvailable } = require('./db');
 const { runScan }    = require('./scanManager');
 const { createUser, loginUser } = require('./auth');
 
@@ -34,15 +34,19 @@ async function createScan(id, target, email) {
     duration_ms:  null,
   };
   activeScans.set(id, scan);
-  await pool.query(
-    'INSERT INTO scans (id, target, email, status) VALUES ($1, $2, $3, $4)',
-    [id, target, email || null, 'queued'],
-  );
+  if (isAvailable()) {
+    await pool.query(
+      'INSERT INTO scans (id, target, email, status) VALUES ($1, $2, $3, $4)',
+      [id, target, email || null, 'queued'],
+    );
+  }
   return scan;
 }
 
 async function getScan(id) {
   if (activeScans.has(id)) return activeScans.get(id);
+
+  if (!isAvailable()) return null;
 
   const { rows } = await pool.query('SELECT * FROM scans WHERE id = $1', [id]);
   if (!rows[0]) return null;
@@ -65,14 +69,16 @@ async function updateScan(id, fields) {
   if (scan) Object.assign(scan, fields);
 
   if (fields.status === 'done' || fields.status === 'error') {
-    const s = scan || {};
-    await pool.query(
-      `UPDATE scans
-          SET status=$1, results=$2, lines=$3, completed_at=$4, duration_ms=$5
-        WHERE id=$6`,
-      [s.status, JSON.stringify(s.results), JSON.stringify(s.lines || []),
-       s.completed_at, s.duration_ms, id],
-    );
+    if (isAvailable()) {
+      const s = scan || {};
+      await pool.query(
+        `UPDATE scans
+            SET status=$1, results=$2, lines=$3, completed_at=$4, duration_ms=$5
+          WHERE id=$6`,
+        [s.status, JSON.stringify(s.results), JSON.stringify(s.lines || []),
+         s.completed_at, s.duration_ms, id],
+      );
+    }
     setTimeout(() => activeScans.delete(id), 60_000);
   }
 }
@@ -290,13 +296,14 @@ init()
         if (ipv4) { myIp = ipv4.address; break; }
       }
 
+      const dbMode = isAvailable() ? 'PostgreSQL' : 'mémoire (sans persistance)';
       console.log(`\n[netguard] Serveur de sécurité démarré`);
       console.log(`- Mode:   ${NODE_ENV}`);
+      console.log(`- DB:     ${dbMode}`);
       console.log(`- Local:  http://localhost:${PORT}`);
       console.log(`- Réseau: http://${myIp}:${PORT}\n`);
     });
   })
   .catch(err => {
-    console.error('[DB] Impossible de se connecter à PostgreSQL:', err.message);
-    process.exit(1);
+    console.error('[init] Erreur inattendue:', err.message);
   });

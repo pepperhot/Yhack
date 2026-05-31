@@ -445,14 +445,24 @@
       writeLine('<span class="mono-dim"># Initializing backend scan...</span>');
 
       const createRes = await fetch(API_URL + '/api/scan', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ targetUrl }),
+        method:      'POST',
+        credentials: 'same-origin',
+        headers:     { 'Content-Type': 'application/json' },
+        body:        JSON.stringify({ targetUrl }),
       });
 
       if (!createRes.ok) {
-        const err = await createRes.json();
-        throw new Error(err.error || 'Scan initialization failed');
+        let errMsg = `Erreur serveur (HTTP ${createRes.status})`;
+        try {
+          const ct = createRes.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const err = await createRes.json();
+            errMsg = err.error || errMsg;
+          } else if (createRes.status === 401) {
+            errMsg = 'Non authentifié — connectez-vous avant de lancer un scan';
+          }
+        } catch (_) {}
+        throw new Error(errMsg);
       }
 
       const { scanId } = await createRes.json();
