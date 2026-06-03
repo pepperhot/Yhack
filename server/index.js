@@ -215,6 +215,7 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
     const scanId    = nanoid(12);
     const startTime = Date.now();
     await createScan(scanId, url.href, email);
+    await updateScan(scanId, { status: 'running' });
 
     console.log('[API] Scan started', { scanId, target: url.href });
 

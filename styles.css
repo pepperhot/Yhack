@@ -70,7 +70,10 @@ body {
 .subtitle { color: var(--muted); font-size: 16px; margin: 0 0 24px; max-width: 60ch; }
 
 .scan-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid rgba(255,255,255,0.08); width: min(580px, 100%); }
-.scan-form input { height: 44px; padding: 0 12px; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text); outline: none; }
+.scan-form input { height: 44px; padding: 0 12px; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--text); outline: none; transition: border-color 0.2s, background 0.2s; }
+.scan-form input:focus { border-color: rgba(0,255,163,0.4); background: rgba(255,255,255,0.09); }
+.scan-form input:disabled { opacity: 0.5; cursor: not-allowed; }
+.scan-form .btn--primary:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
 .scan-form input::placeholder { color: #8aa0b8; }
 .scan-form .form-help { grid-column: 1 / -1; color: var(--muted); margin-top: 4px; }
 
@@ -89,7 +92,7 @@ body {
 .terminal__bar .dot:nth-child(2) { background: #ffbd44; }
 .terminal__bar .dot:nth-child(3) { background: #00ca4e; }
 .terminal__bar .title { margin-left: 8px; color: var(--muted); font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12px; }
-.terminal__body { margin: 0; padding: 14px 16px; font-size: 14px; color: var(--text); background: repeating-linear-gradient(transparent, transparent 28px, rgba(255,255,255,0.02) 28px, rgba(255,255,255,0.02) 29px); }
+.terminal__body { margin: 0; padding: 14px 16px; font-size: 14px; color: var(--text); background: repeating-linear-gradient(transparent, transparent 28px, rgba(255,255,255,0.02) 28px, rgba(255,255,255,0.02) 29px); max-height: 320px; overflow-y: auto; scroll-behavior: smooth; }
 .mono-green { color: var(--primary); }
 .mono-yellow { color: var(--warning); }
 .mono-dim { color: #6a7f98; }

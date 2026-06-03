@@ -142,7 +142,8 @@
   function writeLine(line) {
     if (!termEl) return;
     termEl.innerHTML += '\n' + line;
-    termEl.scrollTop = termEl.scrollHeight;
+    const pre = termEl.parentElement;
+    if (pre) pre.scrollTop = pre.scrollHeight;
   }
 
   function resetTerminal(command) {
@@ -520,8 +521,21 @@
   }
 
   // ── Form submit ────────────────────────────────────────────────────────────
+  let scanning = false;
+  const submitBtn = form.querySelector('button[type="submit"]');
+
+  function setScanningState(active) {
+    scanning = active;
+    if (submitBtn) {
+      submitBtn.disabled = active;
+      submitBtn.textContent = active ? 'Analyse en cours…' : 'Analyser';
+    }
+    if (input) input.disabled = active;
+  }
+
   form.addEventListener('submit', function (e) {
     e.preventDefault();
+    if (scanning) return;
     const url = (input && input.value || '').trim();
     try {
       if (!url) throw new Error('empty');
@@ -532,10 +546,13 @@
       const reportSection = document.getElementById('fullReport');
       if (reportSection) reportSection.hidden = true;
 
-      runBackendScan(normalized).catch(err => {
-        console.error('Scan error:', err);
-        writeLine(`<span class="mono-intense-red"># ERROR: ${escHtml(err.message)}</span>`);
-      });
+      setScanningState(true);
+      runBackendScan(normalized)
+        .catch(err => {
+          console.error('Scan error:', err);
+          writeLine(`<span class="mono-intense-red"># ERROR: ${escHtml(err.message)}</span>`);
+        })
+        .finally(() => setScanningState(false));
     } catch (_) {
       alert('Veuillez saisir une URL valide (ex: https://example.com)');
       if (input) input.focus();
