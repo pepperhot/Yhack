@@ -30,6 +30,7 @@ async function init() {
       );
       CREATE TABLE IF NOT EXISTS scans (
         id           TEXT PRIMARY KEY,
+        user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,
         target       TEXT NOT NULL,
         email        TEXT,
         status       TEXT NOT NULL DEFAULT 'queued',
@@ -39,7 +40,10 @@ async function init() {
         completed_at TIMESTAMPTZ,
         duration_ms  INTEGER
       );
+      CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);
     `);
+    // Migration douce : ajoute user_id si la table scans existait déjà sans cette colonne.
+    await _pool.query(`ALTER TABLE scans ADD COLUMN IF NOT EXISTS user_id TEXT`);
     _available = true;
     console.log('[DB] Tables ready');
   } catch (e) {
@@ -52,6 +56,12 @@ function isAvailable() {
   return _available;
 }
 
+// Pool brut — utilisé par connect-pg-simple pour le stockage des sessions.
+// `null` quand aucune DATABASE_URL n'est configurée (mode mémoire).
+function rawPool() {
+  return _pool;
+}
+
 const pool = {
   query: async (sql, params) => {
     if (!_available || !_pool) return { rows: [] };
@@ -62,4 +72,4 @@ const pool = {
   },
 };
 
-module.exports = { pool, init, isAvailable };
+module.exports = { pool, rawPool, init, isAvailable };

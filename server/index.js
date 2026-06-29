@@ -8,7 +8,7 @@ const path      = require('path');
 const os        = require('os');
 const { nanoid } = require('nanoid');
 const rateLimit  = require('express-rate-limit');
-const { pool, init, isAvailable } = require('./db');
+const { pool, rawPool, init, isAvailable } = require('./db');
 const { runScan }    = require('./scanManager');
 const { createUser, loginUser } = require('./auth');
 
@@ -16,14 +16,19 @@ const app      = express();
 const PORT     = process.env.PORT || 5050;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+// Derrière un reverse proxy (Caddy/Nginx), on fait confiance au 1er proxy
+// pour récupérer la vraie IP client (rate-limit) et le bon protocole (cookies secure).
+app.set('trust proxy', 1);
+
 // ─── Scan store ───────────────────────────────────────────────────────────────
 // Active scans stay in memory for real-time line streaming.
 // On completion they are flushed to PostgreSQL and evicted after 60 s.
 const activeScans = new Map();
 
-async function createScan(id, target, email) {
+async function createScan(id, target, email, userId) {
   const scan = {
     id,
+    user_id:      userId || null,
     target,
     email:        email || null,
     status:       'queued',
@@ -36,8 +41,8 @@ async function createScan(id, target, email) {
   activeScans.set(id, scan);
   if (isAvailable()) {
     await pool.query(
-      'INSERT INTO scans (id, target, email, status) VALUES ($1, $2, $3, $4)',
-      [id, target, email || null, 'queued'],
+      'INSERT INTO scans (id, user_id, target, email, status) VALUES ($1, $2, $3, $4, $5)',
+      [id, userId || null, target, email || null, 'queued'],
     );
   }
   return scan;
@@ -53,6 +58,7 @@ async function getScan(id) {
   const r = rows[0];
   return {
     id:           r.id,
+    user_id:      r.user_id,
     target:       r.target,
     email:        r.email,
     status:       r.status,
@@ -84,16 +90,31 @@ async function updateScan(id, fields) {
 }
 
 // ─── Session ─────────────────────────────────────────────────────────────────
-app.use(session({
+// Stockage en base si PostgreSQL est dispo (sessions persistées au redémarrage),
+// sinon MemoryStore (dev / mode mémoire — sessions perdues au restart).
+const sessionConfig = {
   secret: process.env.SESSION_SECRET || 'netguard-dev-secret-change-in-prod',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     secure: process.env.COOKIE_SECURE === 'true',
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   },
-}));
+};
+
+if (rawPool()) {
+  const pgSession = require('connect-pg-simple')(session);
+  sessionConfig.store = new pgSession({
+    pool: rawPool(),
+    createTableIfMissing: true,
+  });
+} else if (NODE_ENV === 'production') {
+  console.warn('[API] ⚠ Sessions en mémoire en production — configurez DATABASE_URL pour les persister.');
+}
+
+app.use(session(sessionConfig));
 
 function requireAuth(req, res, next) {
   if (!req.session?.user) return res.status(401).json({ error: 'Non authentifié' });
@@ -116,6 +137,16 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '../')));
+
+// ─── Health check ──────────────────────────────────────────────────────────────
+// Utilisé par Docker / le reverse proxy / le monitoring. Ne nécessite pas d'auth.
+app.get('/healthz', (req, res) => {
+  res.json({
+    status: 'ok',
+    db:     isAvailable() ? 'postgres' : 'memory',
+    uptime: Math.round(process.uptime()),
+  });
+});
 
 // ─── Auth routes ─────────────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
@@ -157,12 +188,14 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
+// Limite par utilisateur connecté (fallback IP) — robuste derrière un proxy.
 const scanLimiter = rateLimit({
   windowMs: 60 * 1000,
   max:      parseInt(process.env.MAX_REQUESTS_PER_MINUTE || '5'),
-  message:  'Trop de scans lancés. Attendez une minute.',
+  message:  { error: 'Trop de scans lancés. Attendez une minute.' },
   standardHeaders: true,
   legacyHeaders:   false,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
 });
 
 // ─── URL validation + SSRF protection ────────────────────────────────────────
@@ -213,26 +246,20 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email invalide' });
 
     const scanId    = nanoid(12);
+    const userId    = req.session.user.id;
     const startTime = Date.now();
-    await createScan(scanId, url.href, email);
+    await createScan(scanId, url.href, email, userId);
     await updateScan(scanId, { status: 'running' });
 
-    console.log('[API] Scan started', { scanId, target: url.href });
+    console.log('[API] Scan started', { scanId, target: url.href, userId });
 
-    runScan(url, email, scanId, {
-      prepare: () => ({
-        get: (id) => {
-          const s = activeScans.get(id);
-          return s ? { lines: JSON.stringify(s.lines) } : null;
-        },
-        run: (linesJson, id) => {
-          const s = activeScans.get(id);
-          if (s) {
-            try { s.lines = JSON.parse(linesJson); } catch (_) {}
-          }
-        },
-      }),
-    })
+    // Callback de streaming : chaque ligne est poussée dans le store en mémoire.
+    const emit = (line) => {
+      const s = activeScans.get(scanId);
+      if (s) s.lines.push(line);
+    };
+
+    runScan(url, email, scanId, emit)
       .then(async results => {
         await updateScan(scanId, {
           status:       'done',
@@ -259,14 +286,32 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
   }
 });
 
+// ─── GET /api/scans — historique de l'utilisateur ──────────────────────────────
+app.get('/api/scans', requireAuth, async (req, res) => {
+  if (!isAvailable()) return res.json({ scans: [] });
+  const { rows } = await pool.query(
+    `SELECT id, target, status, duration_ms, created_at, completed_at
+       FROM scans
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 50`,
+    [req.session.user.id],
+  );
+  res.json({ scans: rows });
+});
+
 // ─── GET /api/scan/:id ────────────────────────────────────────────────────────
-app.get('/api/scan/:id', async (req, res) => {
+app.get('/api/scan/:id', requireAuth, async (req, res) => {
   const scanId = req.params.id;
   if (!/^[A-Za-z0-9_-]{12}$/.test(scanId))
     return res.status(400).json({ error: 'ID de scan invalide' });
 
   const scan = await getScan(scanId);
   if (!scan) return res.status(404).json({ error: 'Scan introuvable' });
+
+  // Un utilisateur ne peut consulter que ses propres scans.
+  if (scan.user_id && scan.user_id !== req.session.user.id)
+    return res.status(403).json({ error: 'Accès refusé' });
 
   res.json({
     id:           scan.id,
@@ -281,11 +326,13 @@ app.get('/api/scan/:id', async (req, res) => {
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
-process.on('SIGINT', async () => {
+process.on('SIGINT',  shutdown);
+process.on('SIGTERM', shutdown);
+async function shutdown() {
   console.log('\n[API] Shutting down...');
   await pool.end();
   process.exit(0);
-});
+}
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 init()

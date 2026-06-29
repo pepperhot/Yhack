@@ -1,7 +1,7 @@
-﻿node_modules/
+node_modules/
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
 scan-results.db
 *.db
 *.log

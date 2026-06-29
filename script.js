@@ -476,7 +476,7 @@
       return new Promise((resolve, reject) => {
         const poll = setInterval(async () => {
           try {
-            const pollRes = await fetch(API_URL + '/api/scan/' + scanId);
+            const pollRes = await fetch(API_URL + '/api/scan/' + scanId, { credentials: 'same-origin' });
             if (!pollRes.ok) throw new Error('Poll failed (' + pollRes.status + ')');
             const j = await pollRes.json();
             pollErrors = 0; // reset on success

@@ -11,7 +11,13 @@
       "Bash(node -e \"require\\('better-sqlite3'\\);console.log\\('ok'\\)\")",
       "Bash(git push *)",
       "Bash(gh pr create --title 'feat: scanner de sécurité réaliste — détection fiable + exploitation hints' --body ' *)",
-      "Bash(curl -s http://localhost:5050/ -o /dev/null -w \"%{http_code}\")"
+      "Bash(curl -s http://localhost:5050/ -o /dev/null -w \"%{http_code}\")",
+      "Bash(node --check server/index.js)",
+      "Bash(node --check server/db.js)",
+      "Bash(node --check server/auth.js)",
+      "Bash(node --check server/scanManager.js)",
+      "Bash(node --check server/payloads.js)",
+      "Bash(rm -f /tmp/ng_boot.log /tmp/ng_cookies.txt /tmp/ng_cookies2.txt; echo \"cleanup done\")"
     ]
   }
 }

@@ -1092,23 +1092,17 @@ async function testHTTPMethods(url, onLine) {
 }
 
 // ─── ORCHESTRATEUR PRINCIPAL ──────────────────────────────────────────────────
-async function runScan(url, alertEmail, scanId, db) {
+// `emit` est un callback simple (line: string) => void fourni par l'appelant.
+// Il pousse chaque ligne dans le store du scan en cours (voir server/index.js).
+async function runScan(url, alertEmail, scanId, emit) {
   log('INFO', 'SCAN', `Starting scan`, { target: url.href, scanId });
 
   const results = {};
 
   const onLine = (line) => {
-    if (db && scanId) {
-      try {
-        const scan = db.prepare('SELECT lines FROM scans WHERE id = ?').get(scanId);
-        if (scan) {
-          const lines = JSON.parse(scan.lines || '[]');
-          lines.push(line);
-          db.prepare('UPDATE scans SET lines = ? WHERE id = ?').run(JSON.stringify(lines), scanId);
-        }
-      } catch (e) {
-        console.error('[SCAN] onLine DB error:', e.message);
-      }
+    if (typeof emit === 'function') {
+      try { emit(line); }
+      catch (e) { console.error('[SCAN] emit error:', e.message); }
     }
     console.log('[SCAN]', line.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
   };

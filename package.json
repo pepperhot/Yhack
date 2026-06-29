@@ -23,12 +23,13 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "connect-pg-simple": "^9.0.1",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.2",
     "express-rate-limit": "^7.5.1",
     "express-session": "^1.19.0",
-    "nanoid": "^5.1.11",
+    "nanoid": "^3.3.7",
     "node-fetch": "^2.7.0",
     "nodemailer": "^8.0.7",
     "pg": "^8.21.0"
