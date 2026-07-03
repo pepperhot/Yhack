@@ -8,7 +8,7 @@ const path      = require('path');
 const os        = require('os');
 const { nanoid } = require('nanoid');
 const rateLimit  = require('express-rate-limit');
-const { pool, rawPool, init, isAvailable } = require('./db');
+const { pool, rawDb, init, isAvailable } = require('./db');
 const { runScan }    = require('./scanManager');
 const { createUser, loginUser } = require('./auth');
 
@@ -56,16 +56,17 @@ async function getScan(id) {
   const { rows } = await pool.query('SELECT * FROM scans WHERE id = $1', [id]);
   if (!rows[0]) return null;
   const r = rows[0];
+  const parse = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
   return {
     id:           r.id,
     user_id:      r.user_id,
     target:       r.target,
     email:        r.email,
     status:       r.status,
-    results:      r.results,
-    lines:        r.lines || [],
-    created_at:   r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
-    completed_at: r.completed_at instanceof Date ? r.completed_at.toISOString() : r.completed_at,
+    results:      parse(r.results, null),
+    lines:        parse(r.lines, []),
+    created_at:   r.created_at,
+    completed_at: r.completed_at,
     duration_ms:  r.duration_ms,
   };
 }
@@ -81,8 +82,8 @@ async function updateScan(id, fields) {
         `UPDATE scans
             SET status=$1, results=$2, lines=$3, completed_at=$4, duration_ms=$5
           WHERE id=$6`,
-        [s.status, JSON.stringify(s.results), JSON.stringify(s.lines || []),
-         s.completed_at, s.duration_ms, id],
+        [s.status ?? null, JSON.stringify(s.results ?? null), JSON.stringify(s.lines || []),
+         s.completed_at ?? null, s.duration_ms ?? null, id],
       );
     }
     setTimeout(() => activeScans.delete(id), 60_000);
@@ -90,31 +91,24 @@ async function updateScan(id, fields) {
 }
 
 // ─── Session ─────────────────────────────────────────────────────────────────
-// Stockage en base si PostgreSQL est dispo (sessions persistées au redémarrage),
-// sinon MemoryStore (dev / mode mémoire — sessions perdues au restart).
-const sessionConfig = {
+// Sessions persistées dans SQLite (survivent aux redémarrages).
+const SqliteStore = require('better-sqlite3-session-store')(session);
+
+app.use(session({
   secret: process.env.SESSION_SECRET || 'netguard-dev-secret-change-in-prod',
   resave: false,
   saveUninitialized: false,
+  store: new SqliteStore({
+    client: rawDb(),
+    expired: { clear: true, intervalMs: 15 * 60 * 1000 },
+  }),
   cookie: {
     httpOnly: true,
     secure: process.env.COOKIE_SECURE === 'true',
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   },
-};
-
-if (rawPool()) {
-  const pgSession = require('connect-pg-simple')(session);
-  sessionConfig.store = new pgSession({
-    pool: rawPool(),
-    createTableIfMissing: true,
-  });
-} else if (NODE_ENV === 'production') {
-  console.warn('[API] ⚠ Sessions en mémoire en production — configurez DATABASE_URL pour les persister.');
-}
-
-app.use(session(sessionConfig));
+}));
 
 function requireAuth(req, res, next) {
   if (!req.session?.user) return res.status(401).json({ error: 'Non authentifié' });
@@ -136,14 +130,26 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, '../')));
+
+// SÉCURITÉ : ne jamais servir la base de données ni des fichiers sensibles via HTTP.
+// (le fichier SQLite vit sous la racine servie en statique).
+app.use((req, res, next) => {
+  if (/\.(db|db-wal|db-shm|sqlite)$/i.test(req.path) ||
+      req.path.startsWith('/data/') ||
+      /\.(env|log)$/i.test(req.path)) {
+    return res.status(404).end();
+  }
+  next();
+});
+
+app.use(express.static(path.join(__dirname, '../'), { dotfiles: 'deny' }));
 
 // ─── Health check ──────────────────────────────────────────────────────────────
 // Utilisé par Docker / le reverse proxy / le monitoring. Ne nécessite pas d'auth.
 app.get('/healthz', (req, res) => {
   res.json({
     status: 'ok',
-    db:     isAvailable() ? 'postgres' : 'memory',
+    db:     'sqlite',
     uptime: Math.round(process.uptime()),
   });
 });
@@ -344,7 +350,7 @@ init()
         if (ipv4) { myIp = ipv4.address; break; }
       }
 
-      const dbMode = isAvailable() ? 'PostgreSQL' : 'mémoire (sans persistance)';
+      const dbMode = 'SQLite';
       console.log(`\n[netguard] Serveur de sécurité démarré`);
       console.log(`- Mode:   ${NODE_ENV}`);
       console.log(`- DB:     ${dbMode}`);

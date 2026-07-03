@@ -181,7 +181,9 @@
     let pts = 0, total = 0;
     scored.forEach(({ key, w }) => {
       const st = statuses[key];
-      if (st) { pts += w * (st === 'OK' ? 1 : st === 'WARN' ? 0.5 : 0); total += w; }
+      if (!st || st === 'ERROR') return;   // module non analysé : exclu du score
+      pts += w * (st === 'OK' ? 1 : st === 'WARN' ? 0.5 : 0);
+      total += w;
     });
     const pct   = total > 0 ? Math.round((pts / total) * 100) : 0;
     const grade = pct >= 90 ? 'A' : pct >= 75 ? 'B' : pct >= 60 ? 'C' : pct >= 40 ? 'D' : 'F';
@@ -209,6 +211,7 @@
     if (reportMetaEl) {
       const crits = fullResults?.vulns?.critical_issues || 0;
       const warns = fullResults?.vulns?.warnings        || 0;
+      const errs  = fullResults?.vulns?.errors          || 0;
       const dur   = scanMeta?.duration_ms ? Math.round(scanMeta.duration_ms / 1000) + 's' : '';
       reportMetaEl.innerHTML = `
         <div class="meta-target">${escHtml(scanMeta?.target || '')}</div>
@@ -216,6 +219,7 @@
           ${crits > 0 ? `<span class="meta-badge meta-badge--red">${crits} critique${crits > 1 ? 's' : ''}</span>` : ''}
           ${warns > 0 ? `<span class="meta-badge meta-badge--yellow">${warns} avertissement${warns > 1 ? 's' : ''}</span>` : ''}
           ${crits === 0 && warns === 0 ? '<span class="meta-badge meta-badge--green">Aucun problème</span>' : ''}
+          ${errs > 0 ? `<span class="meta-badge meta-badge--gray">${errs} non analysé${errs > 1 ? 's' : ''}</span>` : ''}
           ${dur ? `<span class="meta-badge">⏱ ${escHtml(dur)}</span>` : ''}
         </div>
       `;
@@ -247,16 +251,18 @@
       MODULE_META.forEach(({ key, label, note }) => {
         const st  = statuses[key];
         if (!st) return;
-        const cls   = st === 'OK' ? 'ok' : st === 'WARN' ? 'warn' : 'fail';
-        const badge = st === 'OK' ? '✓ OK' : st === 'WARN' ? '⚠ WARN' : '✗ FAIL';
+        const cls   = st === 'OK' ? 'ok' : st === 'WARN' ? 'warn' : st === 'ERROR' ? 'error' : 'fail';
+        const badge = st === 'OK' ? '✓ OK' : st === 'WARN' ? '⚠ WARN' : st === 'ERROR' ? '⚠ N/A' : '✗ FAIL';
         const div   = document.createElement('div');
         div.className = `module-card module-card--${cls}`;
-        const hasExploit = cls !== 'ok' && fullResults?.[key]?.exploitation;
+        const hasExploit = cls !== 'ok' && cls !== 'error' && fullResults?.[key]?.exploitation;
+        // Pour un module non analysé, on affiche la raison (cible injoignable…) au lieu de la note générique.
+        const noteText = st === 'ERROR' ? (fullResults?.[key]?.error || 'Cible injoignable') : note;
         div.innerHTML = `
           ${hasExploit ? `<button class="info-btn" data-key="${escHtml(key)}" title="Voir pourquoi &amp; comment exploiter" aria-label="Détails d'exploitation pour ${escHtml(label)}">i</button>` : ''}
           <div class="module-card__name">${escHtml(label)}</div>
           <div class="module-card__status module-card__status--${cls}">${badge}</div>
-          <div class="module-card__note">${escHtml(note)}</div>
+          <div class="module-card__note">${escHtml(noteText)}</div>
         `;
         modulesGrid.appendChild(div);
       });

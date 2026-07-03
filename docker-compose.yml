@@ -1,43 +1,23 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-netguard}
-      POSTGRES_USER: ${POSTGRES_USER:-netguard}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis dans .env}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    # Pas de `ports:` — la base n'est JAMAIS exposée sur Internet,
-    # uniquement accessible via le réseau interne Docker (service "postgres").
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netguard}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   netguard:
     build: .
     restart: unless-stopped
     ports:
       # 127.0.0.1 uniquement : seul le reverse proxy (Caddy/Nginx) y accède.
       - "127.0.0.1:5050:5050"
-    depends_on:
-      postgres:
-        condition: service_healthy
     env_file:
       - .env
     environment:
       - NODE_ENV=production
       - PORT=5050
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-netguard}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-netguard}
       - COOKIE_SECURE=true
+      - DB_PATH=/app/data/netguard.db
+    volumes:
+      # Persiste la base SQLite hors du conteneur (survit aux rebuilds).
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5050/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
-
-volumes:
-  pgdata:

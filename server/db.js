@@ -1,75 +1,63 @@
 'use strict';
 
-const { Pool } = require('pg');
+const path     = require('path');
+const fs       = require('fs');
+const Database = require('better-sqlite3');
 
-let _pool = null;
-let _available = false;
+// La base est un simple fichier local — aucun port réseau, aucun mot de passe.
+// Emplacement hors du dossier servi en statique (voir le garde dans index.js).
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'netguard.db');
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
-const DB_URL = process.env.DATABASE_URL;
-
-if (DB_URL) {
-  _pool = new Pool({ connectionString: DB_URL, max: 10 });
-  _pool.on('error', err => {
-    console.error('[DB] Pool error:', err.message);
-    _available = false;
-  });
-}
+const _db = new Database(DB_PATH);
+_db.pragma('journal_mode = WAL');   // durabilité + lectures concurrentes
+_db.pragma('foreign_keys = ON');
 
 async function init() {
-  if (!_pool) {
-    console.log('[DB] No DATABASE_URL — running in memory-only mode');
-    return;
-  }
-  try {
-    await _pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id            TEXT PRIMARY KEY,
-        email         TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at    TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS scans (
-        id           TEXT PRIMARY KEY,
-        user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,
-        target       TEXT NOT NULL,
-        email        TEXT,
-        status       TEXT NOT NULL DEFAULT 'queued',
-        results      JSONB,
-        lines        JSONB DEFAULT '[]'::jsonb,
-        created_at   TIMESTAMPTZ DEFAULT NOW(),
-        completed_at TIMESTAMPTZ,
-        duration_ms  INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);
-    `);
-    // Migration douce : ajoute user_id si la table scans existait déjà sans cette colonne.
-    await _pool.query(`ALTER TABLE scans ADD COLUMN IF NOT EXISTS user_id TEXT`);
-    _available = true;
-    console.log('[DB] Tables ready');
-  } catch (e) {
-    console.warn('[DB] PostgreSQL unavailable — running in memory-only mode:', e.message);
-    _available = false;
-  }
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            TEXT PRIMARY KEY,
+      email         TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at    TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS scans (
+      id           TEXT PRIMARY KEY,
+      user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,
+      target       TEXT NOT NULL,
+      email        TEXT,
+      status       TEXT NOT NULL DEFAULT 'queued',
+      results      TEXT,
+      lines        TEXT DEFAULT '[]',
+      created_at   TEXT DEFAULT (datetime('now')),
+      completed_at TEXT,
+      duration_ms  INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);
+  `);
+  console.log('[DB] SQLite prêt →', DB_PATH);
 }
 
-function isAvailable() {
-  return _available;
-}
+// SQLite (better-sqlite3) est toujours disponible : plus de mode mémoire.
+function isAvailable() { return true; }
 
-// Pool brut — utilisé par connect-pg-simple pour le stockage des sessions.
-// `null` quand aucune DATABASE_URL n'est configurée (mode mémoire).
-function rawPool() {
-  return _pool;
-}
+// Instance brute — utilisée par le store de sessions.
+function rawDb() { return _db; }
 
+// Shim compatible pg : pool.query(sql, params) → { rows }.
+// Traduit les placeholders $1,$2… (style Postgres) en ? (style SQLite),
+// pour ne pas avoir à réécrire toutes les requêtes des autres modules.
 const pool = {
-  query: async (sql, params) => {
-    if (!_available || !_pool) return { rows: [] };
-    return _pool.query(sql, params);
+  async query(sql, params = []) {
+    const sqlite = sql.replace(/\$(\d+)/g, '?');
+    const stmt   = _db.prepare(sqlite);
+    if (/^\s*select/i.test(sqlite) || /\breturning\b/i.test(sqlite)) {
+      return { rows: stmt.all(...params) };
+    }
+    const info = stmt.run(...params);
+    return { rows: [], rowCount: info.changes };
   },
-  end: async () => {
-    if (_pool) return _pool.end();
-  },
+  async end() { _db.close(); },
 };
 
-module.exports = { pool, rawPool, init, isAvailable };
+module.exports = { pool, rawDb, init, isAvailable };

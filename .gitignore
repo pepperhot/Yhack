@@ -2,7 +2,10 @@ node_modules/
 .env
 .env.*
 !.env.example
-scan-results.db
+data/
 *.db
+*.db-wal
+*.db-shm
+*.sqlite
 *.log
 .DS_Store

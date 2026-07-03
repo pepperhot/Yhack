@@ -141,6 +141,7 @@ body {
 .meta-badge--red    { background: rgba(255,92,138,0.15);  border-color: rgba(255,92,138,0.4);  color: #ff5c8a; }
 .meta-badge--yellow { background: rgba(255,209,102,0.15); border-color: rgba(255,209,102,0.4); color: #ffd166; }
 .meta-badge--green  { background: rgba(0,255,163,0.1);    border-color: rgba(0,255,163,0.3);   color: #00ffa3; }
+.meta-badge--gray   { background: rgba(160,170,190,0.12); border-color: rgba(160,170,190,0.3); color: #a9b3c7; }
 
 /* Section subtitle */
 .report-sub {
@@ -162,17 +163,19 @@ body {
   border-radius: 12px; padding: 12px 14px;
   border-left: 3px solid transparent;
 }
-.module-card--ok   { border-left-color: rgba(0,255,163,0.5); }
-.module-card--warn { border-left-color: rgba(255,209,102,0.6); background: rgba(255,209,102,0.03); }
-.module-card--fail { border-left-color: rgba(255,92,138,0.65); background: rgba(255,92,138,0.04); }
+.module-card--ok    { border-left-color: rgba(0,255,163,0.5); }
+.module-card--warn  { border-left-color: rgba(255,209,102,0.6); background: rgba(255,209,102,0.03); }
+.module-card--fail  { border-left-color: rgba(255,92,138,0.65); background: rgba(255,92,138,0.04); }
+.module-card--error { border-left-color: rgba(160,170,190,0.5); background: rgba(160,170,190,0.03); opacity: 0.85; }
 .module-card__name {
   font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
   letter-spacing: 0.5px; margin-bottom: 6px; font-family: "IBM Plex Mono", monospace;
 }
 .module-card__status { font-size: 13px; font-weight: 700; }
-.module-card__status--ok   { color: var(--primary); }
-.module-card__status--warn { color: var(--warning); }
-.module-card__status--fail { color: var(--danger); }
+.module-card__status--ok    { color: var(--primary); }
+.module-card__status--warn  { color: var(--warning); }
+.module-card__status--fail  { color: var(--danger); }
+.module-card__status--error { color: #a9b3c7; }
 .module-card__note { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.3; }
 
 /* Improvement cards */

@@ -16,29 +16,27 @@ de vrais payloads. Toute utilisation non autorisée est illégale.
 ## Stack
 
 - **Backend** : Node.js 18+ / Express
-- **Base de données** : PostgreSQL (avec fallback mémoire si absente, pour le dev)
+- **Base de données** : SQLite (un fichier `data/netguard.db`, zéro serveur, zéro port réseau)
 - **Frontend** : HTML/CSS/JS statique servi par Express (pas de build)
-- **Auth** : sessions (cookie `httpOnly`), mots de passe hashés bcrypt
-- **Déploiement** : Docker Compose (recommandé) ou PM2
+- **Auth** : sessions (cookie `httpOnly`, persistées en base), mots de passe hashés bcrypt
+- **Déploiement** : PM2 (recommandé) ou Docker
 
 ---
 
 ## Démarrage rapide (local)
 
-### Avec Docker (le plus simple)
 ```bash
-cp .env.example .env          # puis éditer SESSION_SECRET et POSTGRES_PASSWORD
-docker compose up --build
+cp .env.example .env          # éditer SESSION_SECRET
+npm install
+npm start
 ```
-App sur http://localhost:5050 — PostgreSQL démarre automatiquement.
+App sur http://localhost:5050. La base `data/netguard.db` se crée toute seule au
+premier lancement — rien d'autre à installer.
 
-### Sans Docker
+### Avec Docker
 ```bash
 cp .env.example .env
-npm install
-# Optionnel : lancer un PostgreSQL local et renseigner DATABASE_URL dans .env
-# Sans DATABASE_URL → mode mémoire (aucune persistance, pour tests rapides)
-npm start
+docker compose up --build
 ```
 
 ---
@@ -52,12 +50,13 @@ NetGuard/
 ├── styles.css            # Styles
 ├── server/
 │   ├── index.js          # API Express, sessions, routes scan/auth, health
-│   ├── db.js             # Pool PostgreSQL + schéma + fallback mémoire
+│   ├── db.js             # SQLite (better-sqlite3) + schéma + shim compatible pg
 │   ├── auth.js           # register / login (bcrypt)
 │   ├── scanManager.js    # Orchestrateur + 16 modules de test
 │   └── payloads.js       # Tous les payloads centralisés
+├── data/netguard.db      # Base SQLite (créée au 1er lancement, hors Git)
 ├── Dockerfile            # Image Node non-root
-├── docker-compose.yml    # App + PostgreSQL
+├── docker-compose.yml    # App + volume data
 ├── ecosystem.config.js   # Config PM2 (déploiement sans Docker)
 ├── deploy.sh             # Script de redéploiement VPS
 ├── DEPLOYMENT.md         # Guide de mise en prod sur VPS
@@ -114,9 +113,9 @@ le détail commenté. Les essentielles en production :
 | Variable | Rôle |
 |----------|------|
 | `SESSION_SECRET` | **Obligatoire en prod.** Secret de signature des sessions |
-| `POSTGRES_PASSWORD` | **Obligatoire.** Mot de passe DB (compose) |
-| `COOKIE_SECURE` | `true` derrière HTTPS |
+| `COOKIE_SECURE` | `true` derrière HTTPS uniquement |
 | `CORS_ORIGINS` | Domaines autorisés (séparés par virgule) |
+| `DB_PATH` | Chemin du fichier SQLite (défaut `./data/netguard.db`) |
 | `MAX_REQUESTS_PER_MINUTE` | Scans/min par utilisateur (défaut 5) |
 | `ENABLE_EMAIL_ALERTS` + `SMTP_*` | Alertes email (optionnel) |
 

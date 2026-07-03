@@ -1,101 +1,88 @@
 # Déploiement VPS — NetGuard
 
-Guide pas-à-pas pour mettre NetGuard en production sur un VPS (Ubuntu/Debian),
-avec Docker, HTTPS automatique, sauvegardes et supervision.
+Base de données = **SQLite** : un simple fichier, aucun serveur, aucun port,
+aucun mot de passe. C'est ce qui rend le déploiement aussi simple.
 
 Architecture cible :
 
 ```
-Internet ──HTTPS──► Caddy (TLS Let's Encrypt auto)
+Internet ──HTTPS──► Caddy ou Nginx (TLS Let's Encrypt)
                       │  reverse_proxy
                       ▼
-                 NetGuard (127.0.0.1:5050)  ── réseau Docker ──►  PostgreSQL
+                 NetGuard (127.0.0.1:5050)  ──►  data/netguard.db (fichier local)
 ```
-La base et l'app n'écoutent **que** en local ; seul Caddy est exposé (80/443).
+L'app n'écoute qu'en local ; seul le reverse proxy est exposé (80/443).
+
+Deux façons de lancer : **PM2** (natif, recommandé pour ton VPS) ou **Docker**.
 
 ---
 
-## 1. Préparer le VPS
+## Option A — PM2 (recommandé, c'est ce que tu utilises)
 
+### 1. Prérequis
 ```bash
-# Connexion
-ssh root@TON_IP
-
-# Mises à jour + Docker
-apt update && apt upgrade -y
-curl -fsSL https://get.docker.com | sh
-
-# Pare-feu : n'ouvrir que SSH et le web
-apt install -y ufw
-ufw allow OpenSSH
-ufw allow 80
-ufw allow 443
-ufw enable
+ssh pepper@TON_IP
+# Node.js 18+ et PM2
+node --version
+sudo npm install -g pm2
 ```
 
-> ⚠️ Ne jamais ouvrir le port **5432** (PostgreSQL) ni **5050** (Node) sur le
-> pare-feu. Ils restent internes.
-
----
-
-## 2. Récupérer le code
-
+### 2. Récupérer le code + configurer
 ```bash
-# (Recommandé) créer un utilisateur non-root pour le déploiement
-adduser deploy && usermod -aG docker deploy && su - deploy
+cd /var/www/html/Yhack
+git pull
+npm ci --omit=dev
 
-git clone https://github.com/gelucas/<ton-repo>.git netguard
-cd netguard
-```
-
----
-
-## 3. Configurer `.env`
-
-```bash
 cp .env.example .env
 nano .env
 ```
-
-Renseigner **au minimum** (générer les secrets, ne pas inventer à la main) :
-
-```bash
-# Générer un secret de session :
-openssl rand -hex 32
-# Générer un mot de passe DB :
-openssl rand -base64 24
-```
-
+Renseigner **au minimum** :
 ```env
 NODE_ENV=production
-SESSION_SECRET=<colle le openssl rand -hex 32>
-POSTGRES_PASSWORD=<colle le openssl rand -base64 24>
+SESSION_SECRET=<colle: openssl rand -hex 32>
+COOKIE_SECURE=false        # true seulement une fois le HTTPS en place
 CORS_ORIGINS=https://tondomaine.com
-COOKIE_SECURE=true
+```
+> Génère le secret : `openssl rand -hex 32`
+
+### 3. Lancer
+```bash
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup      # copie/colle la commande affichée (démarrage auto au boot)
 ```
 
-`DATABASE_URL` et `COOKIE_SECURE` sont déjà gérés par `docker-compose.yml` — pas
-besoin de les définir à la main si tu utilises Docker.
+### 4. Vérifier
+```bash
+curl localhost:5050/healthz     # → {"status":"ok","db":"sqlite",...}
+pm2 logs netguard
+```
+
+### Mises à jour ensuite
+```bash
+cd /var/www/html/Yhack && git pull && npm ci --omit=dev && pm2 restart netguard --update-env
+```
 
 ---
 
-## 4. Lancer l'application
+## Option B — Docker
 
 ```bash
+cp .env.example .env      # renseigne SESSION_SECRET + CORS_ORIGINS
 docker compose up -d --build
-docker compose ps          # les 2 services doivent être "healthy"
-curl localhost:5050/healthz   # → {"status":"ok","db":"postgres",...}
+docker compose ps
+curl localhost:5050/healthz
 ```
+La base est persistée dans `./data` (volume monté). `docker compose down` n'efface
+rien ; le fichier reste dans `./data/netguard.db`.
 
 ---
 
-## 5. HTTPS avec Caddy (recommandé)
+## HTTPS (Caddy — le plus simple)
 
-Caddy gère le certificat Let's Encrypt **automatiquement**. Pointe d'abord le
-DNS de `tondomaine.com` vers l'IP du VPS (enregistrement A).
+Pointe d'abord le DNS de `tondomaine.com` vers l'IP du VPS, puis :
 
 ```bash
-# Installer Caddy
 apt install -y debian-keyring debian-archive-keyring apt-transport-https
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
@@ -108,128 +95,96 @@ tondomaine.com {
     reverse_proxy localhost:5050
 }
 ```
-
 ```bash
 systemctl reload caddy
 ```
-C'est tout : HTTPS actif, renouvellement automatique du certificat.
+HTTPS actif + renouvellement auto. **Ensuite, passe `COOKIE_SECURE=true` dans
+`.env`** puis `pm2 restart netguard --update-env`.
 
-> Alternative Nginx : il faut générer le certificat (certbot) et écrire un bloc
-> `location / { proxy_pass http://127.0.0.1:5050; ... }`. Caddy fait tout ça seul.
+> Tu as déjà Nginx ? Un bloc `location / { proxy_pass http://127.0.0.1:5050; ... }`
+> + `certbot --nginx -d tondomaine.com` fait le même travail.
 
 ---
 
-## 6. Gérer la base de données
+## Gérer la base de données
 
-La base vit dans le **volume Docker `pgdata`** (persiste aux redémarrages et aux
-rebuilds). Les tables (`users`, `scans`, `session`) sont créées automatiquement
-au premier démarrage.
+C'est **un seul fichier** : `data/netguard.db`. Tables (`users`, `scans`,
+`sessions`) créées automatiquement au premier démarrage.
 
-### Se connecter à la base
+### Voir ce qu'il y a dedans
 ```bash
-docker compose exec postgres psql -U netguard -d netguard
+# Installer le client (une fois) : apt install -y sqlite3
+sqlite3 data/netguard.db
 ```
-Commandes utiles : `\dt` (tables), `SELECT count(*) FROM users;`, `\q` (quitter).
-
-### Sauvegarde (backup)
+```sql
+.tables                                         -- lister les tables
+SELECT email, created_at FROM users;
+SELECT target, status, created_at FROM scans ORDER BY created_at DESC LIMIT 20;
+.quit
+```
+Ou en une ligne :
 ```bash
-docker compose exec -T postgres pg_dump -U netguard netguard > backup_$(date +%F).sql
+sqlite3 data/netguard.db "SELECT count(*) FROM users;"
+```
+
+### Sauvegarde (backup) — copier UN fichier
+```bash
+# Backup cohérent même si l'app tourne (recommandé) :
+sqlite3 data/netguard.db ".backup '/home/pepper/backups/netguard_$(date +%F).db'"
 ```
 
 ### Restauration
 ```bash
-cat backup_2026-06-29.sql | docker compose exec -T postgres psql -U netguard -d netguard
+pm2 stop netguard
+cp /home/pepper/backups/netguard_2026-07-03.db data/netguard.db
+pm2 start netguard
 ```
 
 ### Sauvegarde automatique quotidienne (cron)
 ```bash
+mkdir -p ~/backups
 crontab -e
-# Ajouter (backup à 3h, conserve 7 jours) :
-0 3 * * * cd ~/netguard && docker compose exec -T postgres pg_dump -U netguard netguard > ~/backups/db_$(date +\%F).sql && find ~/backups -name 'db_*.sql' -mtime +7 -delete
+# Backup à 3h, conserve 14 jours :
+0 3 * * * sqlite3 /var/www/html/Yhack/data/netguard.db ".backup '/home/pepper/backups/netguard_$(date +\%F).db'" && find ~/backups -name 'netguard_*.db' -mtime +14 -delete
 ```
-
-### ⚠️ Ne jamais supprimer le volume
-`docker compose down -v` **détruit la base**. Utilise `docker compose down`
-(sans `-v`) pour arrêter sans perdre les données.
+> Idéalement, copie aussi ces backups **hors du VPS** (rsync/scp vers un autre
+> serveur ou un stockage objet) — si le VPS meurt, tu gardes tes données.
 
 ---
 
-## 7. Voir les logs
+## Voir les logs
 
 ```bash
-docker compose logs -f netguard      # logs de l'app en direct
-docker compose logs --tail=100 netguard
-docker compose logs postgres         # logs de la base
+pm2 logs netguard            # en direct
+pm2 logs netguard --lines 100
+# Docker : docker compose logs -f netguard
 ```
-
-Les logs applicatifs sont structurés : `[API]` (requêtes/erreurs serveur),
-`[SCAN]` (déroulé d'un scan), `[DB]` (état base). Chaque scan est tracé avec son
-`scanId` et le `userId`.
-
-Pour persister/rotater les logs au-delà des conteneurs, ajoute dans
-`docker-compose.yml` sous le service `netguard` :
-```yaml
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-```
-
----
-
-## 8. Mettre à jour (redéploiement)
-
-Après un `git push` depuis ta machine :
-```bash
-ssh deploy@TON_IP "cd ~/netguard && bash deploy.sh"
-```
-`deploy.sh` fait : `git pull` → rebuild → restart → affiche l'état + les logs.
-Le volume `pgdata` est conservé, aucune donnée perdue.
-
----
-
-## 9. Alternative sans Docker (PM2)
-
-Si tu préfères tourner en natif :
-```bash
-# PostgreSQL natif
-apt install -y postgresql nodejs npm
-sudo -u postgres createuser netguard -P
-sudo -u postgres createdb netguard -O netguard
-
-# App
-npm ci --omit=dev
-npm install -g pm2
-# Renseigner DATABASE_URL + SESSION_SECRET dans .env
-pm2 start ecosystem.config.js
-pm2 save && pm2 startup     # redémarrage auto au boot
-pm2 logs netguard           # voir les logs
-```
-> Adapte `cwd` dans `ecosystem.config.js` au chemin réel du projet sur le VPS.
+Logs structurés : `[API]` (requêtes/erreurs), `[SCAN]` (déroulé d'un scan avec
+`scanId` + `userId`), `[DB]` (état base).
 
 ---
 
 ## Checklist avant ouverture au public
 
-- [ ] `SESSION_SECRET` et `POSTGRES_PASSWORD` forts et générés aléatoirement
-- [ ] `COOKIE_SECURE=true` + HTTPS actif (Caddy)
+- [ ] `SESSION_SECRET` fort et généré aléatoirement (`openssl rand -hex 32`)
+- [ ] `COOKIE_SECURE=true` **une fois le HTTPS actif**
 - [ ] `CORS_ORIGINS` = ton domaine exact (pas `*`)
-- [ ] Pare-feu : seuls 22/80/443 ouverts ; 5050 et 5432 fermés
-- [ ] `/healthz` répond `ok`
-- [ ] Sauvegarde DB automatisée (cron) et **testée** (restauration vérifiée)
+- [ ] Pare-feu : seuls 22/80/443 ouverts ; 5050 fermé au public
+- [ ] `/healthz` répond `{"db":"sqlite"}`
+- [ ] Le fichier `data/netguard.db` n'est **pas** servi en HTTP (déjà bloqué côté code — `curl https://tondomaine.com/data/netguard.db` doit renvoyer 404)
+- [ ] Backup automatisé (cron) **et testé** (restauration vérifiée), copié hors VPS
 - [ ] `.env` **absent** de Git (`git status` ne doit pas le lister)
-- [ ] Connexion SSH par clé, mot de passe root désactivé
+- [ ] SSH par clé, mot de passe root désactivé
 
 ---
 
 ## Dépannage
 
-| Symptôme | Cause probable / solution |
-|----------|---------------------------|
-| App `unhealthy` au démarrage | DB pas prête → vérifier `docker compose logs postgres` |
-| `db:"memory"` sur `/healthz` | `DATABASE_URL`/`POSTGRES_PASSWORD` mal configuré |
-| Déconnexion à chaque restart | Sessions en mémoire → vérifier que la DB est bien active |
-| 401 sur `/api/scan` | Pas connecté, ou cookie bloqué (vérifier HTTPS + `COOKIE_SECURE`) |
-| Cookie non envoyé | `COOKIE_SECURE=true` mais site en HTTP → passer en HTTPS |
-| Certificat TLS échoue | DNS pas encore propagé vers l'IP du VPS |
+| Symptôme | Cause / solution |
+|----------|------------------|
+| `Cannot find module 'better-sqlite3'` | `npm ci --omit=dev` non lancé, ou binaire non compilé → relancer `npm ci` |
+| Déconnexion à chaque restart | Normalement réglé (sessions en base). Vérifier que `data/netguard.db` est bien écrit (droits du dossier `data/`) |
+| 401 sur `/api/scan` | Pas connecté, ou cookie bloqué (voir ligne suivante) |
+| Cookie non envoyé / login KO | `COOKIE_SECURE=true` mais site en HTTP → repasser à `false` ou activer HTTPS |
+| `EADDRINUSE :5050` | Une instance tourne déjà → `pm2 restart netguard` (ne pas relancer `npm start`) |
+| `SQLITE_BUSY` sous forte charge | Rare ; le mode WAL est déjà activé. Si ça persiste, c'est le signal qu'il faudra passer à Postgres (beaucoup d'écritures concurrentes) |

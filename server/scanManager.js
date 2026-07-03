@@ -8,9 +8,16 @@
 const dns      = require('dns').promises;
 const net      = require('net');
 const tls      = require('tls');
+const https    = require('https');
 const fetch    = require('node-fetch');
 const nodemailer = require('nodemailer');
 const { PAYLOADS } = require('./payloads');
+
+// Un scanner de sécurité doit pouvoir auditer une cible MÊME si son certificat
+// est invalide / auto-signé / expiré. Sans ça, node-fetch lève une erreur sur
+// chaque requête HTTPS et tous les modules HTTP échouent. Le module TLS analyse
+// le certificat séparément, donc on ne perd pas l'info de sécurité du certificat.
+const insecureAgent = new https.Agent({ rejectUnauthorized: false });
 
 const SCAN_DELAY   = parseInt(process.env.SCAN_DELAY_MS   || '150');
 const SCAN_TIMEOUT = parseInt(process.env.SCAN_TIMEOUT_MS || '8000');
@@ -58,7 +65,12 @@ async function safeFetch(url, opts = {}) {
   const ctrl  = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeout || SCAN_TIMEOUT);
   try {
-    return await fetch(url, { ...opts, signal: ctrl.signal });
+    return await fetch(url, {
+      // Ignore les certificats invalides sur les cibles HTTPS (voir insecureAgent).
+      agent: parsedURL => (parsedURL.protocol === 'https:' ? insecureAgent : undefined),
+      ...opts,
+      signal: ctrl.signal,
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -105,7 +117,7 @@ async function testDNS(url, onLine) {
     };
   } catch (e) {
     onLine(`  ! DNS error: ${esc(e.message)}`);
-    return { status: 'FAIL', error: e.message };
+    return { status: 'ERROR', error: e.message };
   }
 }
 
@@ -217,7 +229,7 @@ async function testTLS(url, onLine) {
     return result;
   } catch (e) {
     onLine(`  ! TLS erreur: ${esc(e.message)}`);
-    return { status: 'FAIL', error: e.message };
+    return { status: 'ERROR', error: e.message };
   }
 }
 
@@ -307,7 +319,7 @@ async function testHeaders(url, onLine) {
     return result;
   } catch (e) {
     onLine(`  ! Headers erreur: ${esc(e.message)}`);
-    return { status: 'FAIL', error: e.message };
+    return { status: 'ERROR', error: e.message };
   }
 }
 
@@ -373,7 +385,7 @@ async function testCORS(url, onLine, alertEmail) {
     return { status: 'OK', vulnerable: false };
   } catch (e) {
     onLine(`  ! CORS erreur: ${esc(e.message)}`);
-    return { status: 'FAIL', error: e.message };
+    return { status: 'ERROR', error: e.message };
   }
 }
 
@@ -441,7 +453,7 @@ async function testCookies(url, onLine) {
     return result;
   } catch (e) {
     onLine(`  ! Cookies erreur: ${esc(e.message)}`);
-    return { status: 'FAIL', error: e.message };
+    return { status: 'ERROR', error: e.message };
   }
 }
 
@@ -528,7 +540,7 @@ async function testTechStack(url, onLine) {
     return result;
   } catch (e) {
     onLine(`  ! Tech detection erreur: ${esc(e.message)}`);
-    return { status: 'FAIL', error: e.message };
+    return { status: 'ERROR', error: e.message };
   }
 }
 
@@ -1165,15 +1177,17 @@ async function runScan(url, alertEmail, scanId, emit) {
     // ── Score final ──────────────────────────────────────────────────────────
     const criticals = Object.values(results).filter(r => r && r.status === 'FAIL').length;
     const warnings  = Object.values(results).filter(r => r && r.status === 'WARN').length;
+    const errors    = Object.values(results).filter(r => r && r.status === 'ERROR').length;
 
     results.vulns = {
       status:          criticals > 0 ? 'FAIL' : warnings > 3 ? 'WARN' : 'OK',
       critical_issues: criticals,
       warnings,
+      errors,
     };
 
     onLine('━'.repeat(50));
-    onLine(`▸ RÉSULTATS : ${criticals} critique(s) | ${warnings} avertissement(s)`);
+    onLine(`▸ RÉSULTATS : ${criticals} critique(s) | ${warnings} avertissement(s)${errors ? ` | ${errors} module(s) non analysé(s)` : ''}`);
     onLine('▸ Scan terminé ✓');
     log('INFO', 'SCAN', 'Done', { criticals, warnings, scanId });
 
