@@ -157,8 +157,9 @@
     const keys = [
       'dns', 'tls', 'headers', 'cors', 'cookies', 'tech',
       'sensitive_files', 'robots', 'ports',
+      'https_redirect', 'mixed_content', 'dir_listing',
       'sqli', 'xss', 'lfi', 'rce', 'mako',
-      'open_redirect', 'http_methods', 'vulns',
+      'open_redirect', 'http_methods', 'host_injection', 'error_disclosure', 'vulns',
     ];
     const map = {};
     keys.forEach(k => { if (results[k]?.status) map[k] = results[k].status; });
@@ -174,9 +175,11 @@
       { key: 'sqli', w: 3 }, { key: 'xss', w: 3 }, { key: 'rce', w: 3 },
       { key: 'lfi',  w: 3 }, { key: 'mako', w: 3 },
       { key: 'tls',  w: 2 }, { key: 'headers', w: 2 }, { key: 'cors', w: 2 },
+      { key: 'mixed_content', w: 2 }, { key: 'host_injection', w: 2 },
       { key: 'dns',  w: 1 }, { key: 'cookies', w: 1 }, { key: 'ports', w: 1 },
       { key: 'sensitive_files', w: 1 }, { key: 'robots', w: 1 },
       { key: 'tech', w: 1 }, { key: 'open_redirect', w: 1 }, { key: 'http_methods', w: 1 },
+      { key: 'https_redirect', w: 1 }, { key: 'dir_listing', w: 1 }, { key: 'error_disclosure', w: 1 },
     ];
     let pts = 0, total = 0;
     scored.forEach(({ key, w }) => {
@@ -236,6 +239,9 @@
       { key: 'sensitive_files', label: 'Fichiers',      note: '.env, .git, backups...' },
       { key: 'robots',          label: 'robots.txt',    note: 'Chemins révélés' },
       { key: 'ports',           label: 'Ports TCP',     note: 'Services exposés' },
+      { key: 'https_redirect',  label: 'HTTPS Redirect',note: 'HTTP → HTTPS forcé' },
+      { key: 'mixed_content',   label: 'Mixed Content', note: 'Ressources http & SRI' },
+      { key: 'dir_listing',     label: 'Dir Listing',   note: 'Répertoires ouverts' },
       { key: 'sqli',            label: 'SQLi',          note: 'Error-based & blind' },
       { key: 'xss',             label: 'XSS',           note: 'Scripting réfléchi' },
       { key: 'lfi',             label: 'LFI',           note: 'File Inclusion locale' },
@@ -243,6 +249,8 @@
       { key: 'mako',            label: 'SSTI',          note: 'Template Injection' },
       { key: 'open_redirect',   label: 'Redirect',      note: 'Open Redirect' },
       { key: 'http_methods',    label: 'Méthodes HTTP', note: 'PUT, DELETE, TRACE' },
+      { key: 'host_injection',  label: 'Host Header',   note: 'Injection / poisoning' },
+      { key: 'error_disclosure',label: 'Erreurs',       note: 'Stack traces exposées' },
     ];
 
     const modulesGrid = document.getElementById('modulesGrid');
@@ -293,6 +301,11 @@
       http_methods:    'Méthodes HTTP dangereuses',
       dns:             'Configuration DNS',
       tech:            'Exposition des technologies',
+      https_redirect:  'Redirection HTTPS non forcée',
+      mixed_content:   'Contenu mixte / SRI manquant',
+      dir_listing:     'Listing de répertoires',
+      host_injection:  'Injection Host Header',
+      error_disclosure:'Fuite de messages d\'erreur',
     };
 
     const improvements = [];

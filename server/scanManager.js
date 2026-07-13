@@ -1103,6 +1103,205 @@ async function testHTTPMethods(url, onLine) {
   };
 }
 
+// ─── MODULE: HTTPS Redirect ───────────────────────────────────────────────────
+async function testHTTPSRedirect(url, onLine) {
+  onLine('▸ [HTTPS] Redirection HTTP → HTTPS ..............');
+  try {
+    const httpUrl = new URL(url.href);
+    httpUrl.protocol = 'http:';
+    httpUrl.port = '';
+    const resp = await safeFetch(httpUrl.href, { redirect: 'manual', timeout: 5000 });
+    const loc  = resp.headers.get('location') || '';
+    const redirectsToHttps = resp.status >= 300 && resp.status < 400 && /^https:/i.test(loc);
+
+    if (redirectsToHttps) {
+      onLine('  ✓ HTTP redirige bien vers HTTPS');
+      return { status: 'OK', redirects: true };
+    }
+    if (resp.status >= 200 && resp.status < 300) {
+      onLine('  ! HTTP sert du contenu sans rediriger vers HTTPS');
+      return {
+        status: 'WARN',
+        redirects: false,
+        exploitation: {
+          description: 'Le site répond en HTTP sans forcer HTTPS : un attaquant réseau peut intercepter la 1ʳᵉ requête (sslstrip) et rester en clair.',
+          example: `# Vérification :\ncurl -sI http://${url.hostname}/ | grep -i location\n# (aucune redirection 301/302 vers https:// = vulnérable)`,
+          manual: '# Attaque sslstrip sur un Wi-Fi public :\nbettercap -iface wlan0 -eval "set http.proxy.sslstrip true; http.proxy on"',
+          tools: ['bettercap', 'sslstrip', 'mitmproxy'],
+          impact: 'Interception des identifiants/cookies transmis en clair avant la bascule HTTPS.',
+          cvss: 6.5,
+          remediation: 'Rediriger tout le trafic HTTP en 301 vers HTTPS, puis activer HSTS avec preload.',
+        },
+      };
+    }
+    onLine('  ✓ HTTP non exploitable');
+    return { status: 'OK', redirects: false };
+  } catch (e) {
+    onLine('  ✓ HTTP inaccessible (bon signe)');
+    return { status: 'OK' };
+  }
+}
+
+// ─── MODULE: Mixed Content & SRI ──────────────────────────────────────────────
+async function testMixedContent(url, onLine) {
+  onLine('▸ [MIXED] Contenu mixte & intégrité (SRI) ......');
+  if (url.protocol !== 'https:') { onLine('  • Cible HTTP — non applicable'); return { status: 'OK' }; }
+  try {
+    const resp = await safeFetch(url.href, { redirect: 'follow' });
+    const body = await resp.text();
+
+    const mixed = [...body.matchAll(/(?:src|href)\s*=\s*["'](http:\/\/[^"']+)["']/gi)]
+      .map(m => m[1]).filter((v, i, a) => a.indexOf(v) === i).slice(0, 8);
+
+    const extScripts = [...body.matchAll(/<script[^>]+src\s*=\s*["'](https?:\/\/[^"']+)["'][^>]*>/gi)];
+    const noSri = extScripts
+      .filter(s => !/integrity\s*=/i.test(s[0]))
+      .map(s => s[1])
+      .filter(u => { try { return new URL(u).hostname !== url.hostname; } catch { return false; } })
+      .filter((v, i, a) => a.indexOf(v) === i).slice(0, 8);
+
+    mixed.forEach(m => onLine(`  ! Ressource HTTP sur page HTTPS: ${esc(m)}`));
+    noSri.forEach(s => onLine(`  ! Script externe sans SRI: ${esc(s)}`));
+    if (!mixed.length && !noSri.length) { onLine('  ✓ Aucun contenu mixte, SRI OK'); return { status: 'OK' }; }
+
+    const status = mixed.length ? 'FAIL' : 'WARN';
+    return {
+      status,
+      mixed_content: mixed,
+      missing_sri: noSri,
+      exploitation: {
+        description: mixed.length
+          ? 'Ressources chargées en HTTP sur une page HTTPS : le cadenas est cassé et un attaquant réseau peut injecter du JS malveillant à la place.'
+          : 'Scripts tiers chargés sans Subresource Integrity (SRI) : si le CDN est compromis, du code arbitraire s\'exécute chez vos visiteurs.',
+        example: mixed.length
+          ? `# Ressource interceptable :\n${mixed[0]}\n# Un MITM remplace ce fichier par du JS malveillant.`
+          : `# Script sans garde-fou :\n${noSri[0]}\n# Ajouter :  <script src="..." integrity="sha384-..." crossorigin="anonymous">`,
+        tools: ['bettercap', 'mitmproxy', 'SecurityHeaders.com'],
+        impact: mixed.length ? 'Injection de JS via MITM → vol de session, keylogging.' : 'Supply-chain : compromission du CDN → exécution chez tous les visiteurs.',
+        cvss: mixed.length ? 7.4 : 5.3,
+        remediation: 'Charger toutes les ressources en HTTPS. Ajouter integrity + crossorigin sur les scripts tiers. Activer une CSP.',
+      },
+    };
+  } catch (e) {
+    onLine(`  ! Mixed content erreur: ${esc(e.message)}`);
+    return { status: 'ERROR', error: e.message };
+  }
+}
+
+// ─── MODULE: Directory Listing ────────────────────────────────────────────────
+async function testDirListing(url, onLine) {
+  onLine('▸ [DIRLIST] Listing de répertoires .............');
+  const dirs = ['/uploads/', '/images/', '/img/', '/files/', '/backup/', '/backups/',
+    '/assets/', '/static/', '/js/', '/css/', '/tmp/', '/data/', '/media/', '/downloads/'];
+  const found = [];
+  for (const d of dirs) {
+    try {
+      const r = await safeFetch(new URL(d, url.href).href, { timeout: 3000, redirect: 'manual' });
+      if (r.status === 200) {
+        const t = await r.text();
+        if (/<title>\s*Index of \//i.test(t) || /Directory listing for/i.test(t) || /\[To Parent Directory\]/i.test(t)) {
+          found.push(d);
+          onLine(`  ! Listing exposé: ${esc(d)}`);
+        }
+      }
+    } catch (_) {}
+    await wait(80);
+  }
+  if (!found.length) { onLine('  ✓ Aucun listing de répertoire exposé'); return { status: 'OK', dirs: [] }; }
+  return {
+    status: 'WARN',
+    exposed_dirs: found,
+    exploitation: {
+      description: `Listing de répertoire activé sur : ${found.join(', ')}. Le serveur affiche le contenu des dossiers, révélant des fichiers non liés depuis le site.`,
+      example: found.map(d => `curl -s ${url.origin}${d}`).join('\n'),
+      manual: `# Aspirer tout le dossier exposé :\nwget -r -np -nH ${url.origin}${found[0]}`,
+      tools: ['curl', 'wget', 'dirsearch'],
+      impact: 'Découverte de backups, fichiers sources, documents privés, uploads d\'autres utilisateurs.',
+      cvss: 5.3,
+      remediation: 'Désactiver l\'autoindex (Apache: "Options -Indexes" ; Nginx: "autoindex off;").',
+    },
+  };
+}
+
+// ─── MODULE: Host Header Injection ────────────────────────────────────────────
+async function testHostInjection(url, onLine) {
+  onLine('▸ [HOST] Injection Host Header .................');
+  const evil = 'evil-netguard.test';
+  try {
+    const resp = await safeFetch(url.href, {
+      headers: { 'X-Forwarded-Host': evil, 'X-Host': evil, 'X-Forwarded-Server': evil },
+      redirect: 'manual', timeout: 5000,
+    });
+    const loc  = resp.headers.get('location') || '';
+    const body = await resp.text();
+    const inRedirect = loc.includes(evil);
+    const inBody     = body.includes(evil);
+    if (!inRedirect && !inBody) { onLine('  ✓ Host header non reflété'); return { status: 'OK', vulnerable: false }; }
+
+    onLine(`  ! Host injecté reflété dans ${inRedirect ? 'la redirection' : 'la page'}`);
+    return {
+      status: inRedirect ? 'FAIL' : 'WARN',
+      vulnerable: true,
+      location: inRedirect,
+      exploitation: {
+        description: 'Le serveur fait confiance à l\'en-tête Host/X-Forwarded-Host fourni par le client. Menace principale : empoisonnement des liens de réinitialisation de mot de passe.',
+        example: `curl -s ${url.href} -H "X-Forwarded-Host: ${evil}" | grep -i ${evil}`,
+        phishing: `# Empoisonnement du reset de mot de passe :\n# 1. L'attaquant déclenche "mot de passe oublié" pour la victime avec :\ncurl -X POST ${url.origin}/reset -H "Host: attacker.com" -d "email=victime@x.com"\n# 2. Le mail de reset contient un lien vers https://attacker.com/reset?token=...\n# 3. La victime clique → le token part chez l'attaquant → compte volé`,
+        tools: ['Burp Suite', 'curl'],
+        impact: 'Prise de compte via empoisonnement du reset password, cache poisoning, contournement de contrôles basés sur le Host.',
+        cvss: inRedirect ? 7.4 : 5.3,
+        remediation: 'Utiliser une liste blanche de domaines autorisés côté serveur, ignorer X-Forwarded-Host, définir une base URL fixe pour les emails.',
+      },
+    };
+  } catch (e) {
+    onLine(`  ! Host injection erreur: ${esc(e.message)}`);
+    return { status: 'ERROR', error: e.message };
+  }
+}
+
+// ─── MODULE: Error / Stack Trace Disclosure ───────────────────────────────────
+async function testErrorDisclosure(url, onLine) {
+  onLine('▸ [ERRORS] Fuite de messages d\'erreur .........');
+  const patterns = [
+    { rx: /Fatal error:|Parse error:|Warning:.*on line \d+/i,          tech: 'PHP' },
+    { rx: /Traceback \(most recent call last\)/i,                       tech: 'Python' },
+    { rx: /at [\w.$]+\([\w]+\.java:\d+\)|java\.lang\.[A-Za-z.]+Exception/, tech: 'Java' },
+    { rx: /System\.[A-Za-z.]+Exception|Microsoft \.NET Framework|\bASP\.NET\b/i, tech: '.NET' },
+    { rx: /ORA-\d{5}|SQLSTATE\[|SQL syntax.*MySQL/i,                    tech: 'SQL/DB' },
+    { rx: /Error: Cannot GET|at Object\.<anonymous>|node_modules/i,     tech: 'Node.js' },
+  ];
+  const probes = ["'", '%00', '../../', '[]=1', 'x\';'];
+  for (const probe of probes) {
+    try {
+      const u = new URL(url.href);
+      u.searchParams.set('q', probe);
+      const resp = await safeFetch(u.href, { timeout: 5000 });
+      const text = await resp.text();
+      const hit  = patterns.find(p => p.rx.test(text));
+      if (hit) {
+        onLine(`  ! Stack trace ${hit.tech} exposée (payload: ${esc(probe)})`);
+        return {
+          status: 'WARN',
+          tech: hit.tech,
+          payload: probe,
+          exploitation: {
+            description: `Le serveur renvoie une erreur détaillée ${hit.tech} au lieu d'une page générique. Ça révèle la stack technique, des chemins internes et parfois des requêtes SQL.`,
+            example: `${u.href}\n# → la réponse contient une trace ${hit.tech} exploitable pour affiner une attaque.`,
+            manual: '# Ces messages guident l\'attaquant : versions exactes → CVE ciblés, chemins → LFI, requêtes → SQLi.',
+            tools: ['Burp Suite', 'curl'],
+            impact: 'Divulgation d\'informations : chemins serveur, versions logicielles, structure de la base — facilite les attaques suivantes.',
+            cvss: 5.3,
+            remediation: `Désactiver l'affichage des erreurs en production (${hit.tech === 'PHP' ? 'display_errors=Off' : 'mode production'}). Renvoyer des pages 404/500 génériques.`,
+          },
+        };
+      }
+    } catch (_) {}
+    await wait(SCAN_DELAY);
+  }
+  onLine('  ✓ Aucune fuite de message d\'erreur');
+  return { status: 'OK' };
+}
+
 // ─── ORCHESTRATEUR PRINCIPAL ──────────────────────────────────────────────────
 // `emit` est un callback simple (line: string) => void fourni par l'appelant.
 // Il pousse chaque ligne dans le store du scan en cours (voir server/index.js).
@@ -1130,6 +1329,7 @@ async function runScan(url, alertEmail, scanId, emit) {
     const [
       dnsResult, tlsResult, headersResult, corsResult,
       cookiesResult, techResult, filesResult, robotsResult, portsResult,
+      httpsRedirectResult, mixedResult, dirListResult,
     ] = await Promise.all([
       testDNS(url, onLine),
       testTLS(url, onLine),
@@ -1140,6 +1340,9 @@ async function runScan(url, alertEmail, scanId, emit) {
       testSensitiveFiles(url, onLine),
       testRobots(url, onLine),
       testPorts(url, onLine),
+      testHTTPSRedirect(url, onLine),
+      testMixedContent(url, onLine),
+      testDirListing(url, onLine),
     ]);
 
     Object.assign(results, {
@@ -1152,6 +1355,9 @@ async function runScan(url, alertEmail, scanId, emit) {
       sensitive_files: filesResult,
       robots:          robotsResult,
       ports:           portsResult,
+      https_redirect:  httpsRedirectResult,
+      mixed_content:   mixedResult,
+      dir_listing:     dirListResult,
     });
 
     onLine('━'.repeat(50));
@@ -1171,8 +1377,10 @@ async function runScan(url, alertEmail, scanId, emit) {
     // ── Phase 3 : Tests logiques ─────────────────────────────────────────────
     onLine('▸ PHASE 3 — Tests logiques');
 
-    results.open_redirect = await testOpenRedirect(url, onLine); await wait(150);
-    results.http_methods  = await testHTTPMethods(url, onLine);
+    results.open_redirect    = await testOpenRedirect(url, onLine);   await wait(150);
+    results.http_methods     = await testHTTPMethods(url, onLine);     await wait(150);
+    results.host_injection   = await testHostInjection(url, onLine);   await wait(150);
+    results.error_disclosure = await testErrorDisclosure(url, onLine);
 
     // ── Score final ──────────────────────────────────────────────────────────
     const criticals = Object.values(results).filter(r => r && r.status === 'FAIL').length;
