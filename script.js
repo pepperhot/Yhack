@@ -462,7 +462,7 @@
   }
 
   // ── Backend scan + polling ─────────────────────────────────────────────────
-  async function runBackendScan(targetUrl, mode, authorized) {
+  async function runBackendScan(targetUrl, mode) {
     try {
       writeLine('<span class="mono-dim"># Initializing backend scan (' + (mode || 'passive') + ')...</span>');
 
@@ -470,7 +470,7 @@
         method:      'POST',
         credentials: 'same-origin',
         headers:     { 'Content-Type': 'application/json' },
-        body:        JSON.stringify({ targetUrl, mode: mode || 'passive', authorized: !!authorized }),
+        body:        JSON.stringify({ targetUrl, mode: mode || 'passive' }),
       });
 
       if (!createRes.ok) {
@@ -750,30 +750,17 @@
     if (input) input.disabled = active;
   }
 
-  // Mode passif/actif : la case d'attestation n'apparaît qu'en mode actif.
-  const authorizeBox = document.getElementById('scanAuthorize');
-  const authorizeChk = document.getElementById('authorizeCheck');
+  // Mode passif / actif.
   function currentMode() {
     const el = form.querySelector('input[name="scanMode"]:checked');
     return el ? el.value : 'passive';
   }
-  form.querySelectorAll('input[name="scanMode"]').forEach(r => {
-    r.addEventListener('change', () => {
-      if (authorizeBox) authorizeBox.hidden = currentMode() !== 'active';
-    });
-  });
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     if (scanning) return;
     const url  = (input && input.value || '').trim();
     const mode = currentMode();
-    const authorized = !!(authorizeChk && authorizeChk.checked);
-
-    if (mode === 'active' && !authorized) {
-      alert('Cochez l\'attestation d\'autorisation pour lancer un scan actif.');
-      return;
-    }
 
     try {
       if (!url) throw new Error('empty');
@@ -785,7 +772,7 @@
       if (reportSection) reportSection.hidden = true;
 
       setScanningState(true);
-      runBackendScan(normalized, mode, authorized)
+      runBackendScan(normalized, mode)
         .catch(err => {
           console.error('Scan error:', err);
           if (/domaine/i.test(err.message) || /DOMAIN_NOT_VERIFIED/.test(err.message)) {

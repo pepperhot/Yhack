@@ -349,7 +349,7 @@ async function verifiedDomainFor(userId, hostname) {
 // ─── POST /api/scan ───────────────────────────────────────────────────────────
 app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
   try {
-    const { targetUrl, email, authorized } = req.body || {};
+    const { targetUrl, email } = req.body || {};
     const mode = (req.body || {}).mode === 'active' ? 'active' : 'passive';
 
     let url;
@@ -364,17 +364,15 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
 
     const userId = req.session.user.id;
 
-    // ── Bridage : un scan ACTIF exige l'attestation + un domaine vérifié ──────
+    // ── Bridage : un scan ACTIF exige un domaine dont la propriété est prouvée ─
     if (mode === 'active') {
-      if (authorized !== true)
-        return res.status(400).json({ error: 'Vous devez attester être autorisé à tester cette cible.' });
       const owned = await verifiedDomainFor(userId, url.hostname);
       if (!owned)
         return res.status(403).json({
           error: 'Scan actif refusé : vous devez d\'abord prouver la propriété de ce domaine.',
           code: 'DOMAIN_NOT_VERIFIED',
         });
-      // Trace d'audit (preuve d'autorisation) : utilisateur, IP, cible, domaine.
+      // Trace d'audit : utilisateur, IP, cible, domaine vérifié.
       console.log('[AUTH-SCAN] Active scan authorized', {
         userId, ip: req.ip, target: url.href, domain: owned.domain, at: new Date().toISOString(),
       });

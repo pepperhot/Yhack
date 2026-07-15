@@ -42,14 +42,9 @@ curl -s -b "$JAR" -X POST "$BASE/api/scan" -H "Content-Type: application/json" \
   -d '{"targetUrl":"https://example.com","mode":"passive"}' | grep -q '"scanId"' \
   && ok "scan passif accepté" || ko "scan passif KO"
 
-# 6. Scan ACTIF sans attestation → 400
+# 6. Scan ACTIF sur un domaine non vérifié → 403
 [ "$(code -b "$JAR" -X POST "$BASE/api/scan" -H "Content-Type: application/json" \
-  -d '{"targetUrl":"https://example.com","mode":"active"}')" = "400" ] \
-  && ok "scan actif sans attestation → refusé (400)" || ko "⚠ bridage attestation KO"
-
-# 7. Scan ACTIF attesté mais domaine non vérifié → 403
-[ "$(code -b "$JAR" -X POST "$BASE/api/scan" -H "Content-Type: application/json" \
-  -d '{"targetUrl":"https://example.com","mode":"active","authorized":true}')" = "403" ] \
+  -d '{"targetUrl":"https://example.com","mode":"active"}')" = "403" ] \
   && ok "scan actif sur domaine non vérifié → refusé (403)" || ko "⚠ BRIDAGE DOMAINE KO"
 
 rm -f "$JAR"
