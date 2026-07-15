@@ -12,11 +12,13 @@
     if (overlay)  overlay.hidden = true;
     if (navUser)  navUser.hidden = false;
     if (emailEl)  emailEl.textContent = user.email;
+    document.dispatchEvent(new CustomEvent('ng:auth', { detail: user }));
   }
 
   function showAuth() {
     if (overlay)  overlay.hidden = false;
     if (navUser)  navUser.hidden = true;
+    document.dispatchEvent(new CustomEvent('ng:logout'));
   }
 
   // Check existing session on load
@@ -510,6 +512,7 @@
               writeLine('<span class="mono-dim"># Scan completed ✓</span>');
               try {
                 buildReport(mapResultsToStatus(j.results), j.results, j);
+                loadHistory();
               } catch (reportErr) {
                 console.error('buildReport error:', reportErr);
                 writeLine('<span class="mono-intense-red"># Erreur lors de la génération du rapport</span>');
@@ -538,6 +541,87 @@
       throw e;
     }
   }
+
+  // ── Historique / Mes scans ─────────────────────────────────────────────────
+  const historyBtn     = document.getElementById('historyBtn');
+  const newScanBtn      = document.getElementById('newScanBtn');
+  const historyRefresh  = document.getElementById('historyRefresh');
+  const historySection  = document.getElementById('historySection');
+  const historyList     = document.getElementById('historyList');
+  const historyEmpty    = document.getElementById('historyEmpty');
+  const reportSectionEl = document.getElementById('fullReport');
+
+  function fmtDate(s) {
+    if (!s) return '';
+    try {
+      const iso = s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
+      return new Date(iso).toLocaleString('fr-FR');
+    } catch (_) { return s; }
+  }
+
+  async function loadHistory() {
+    if (!historyList) return;
+    try {
+      const res = await fetch(API_URL + '/api/scans', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const { scans } = await res.json();
+      historyList.innerHTML = '';
+      if (!scans || !scans.length) { if (historyEmpty) historyEmpty.hidden = false; return; }
+      if (historyEmpty) historyEmpty.hidden = true;
+      scans.forEach(s => {
+        const cls   = s.status === 'done' ? 'ok' : s.status === 'error' ? 'fail' : 'warn';
+        const badge = s.status === 'done' ? 'Terminé' : s.status === 'error' ? 'Erreur'
+                    : s.status === 'running' ? 'En cours' : s.status;
+        const dur   = s.duration_ms ? Math.round(s.duration_ms / 1000) + 's' : '';
+        const item  = document.createElement('button');
+        item.className = 'history-item';
+        item.type = 'button';
+        item.dataset.id = s.id;
+        item.innerHTML = `
+          <span class="history-item__target">${escHtml(s.target)}</span>
+          <span class="history-item__meta">
+            <span class="history-badge history-badge--${cls}">${escHtml(badge)}</span>
+            <span class="history-date">${escHtml(fmtDate(s.created_at))}</span>
+            ${dur ? `<span class="history-dur">⏱ ${escHtml(dur)}</span>` : ''}
+          </span>`;
+        historyList.appendChild(item);
+      });
+    } catch (_) {}
+  }
+
+  if (historyList) {
+    historyList.addEventListener('click', async (e) => {
+      const item = e.target.closest('.history-item');
+      if (!item) return;
+      try {
+        const res = await fetch(API_URL + '/api/scan/' + item.dataset.id, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const scan = await res.json();
+        if (scan.status !== 'done' || !scan.results) {
+          alert('Rapport indisponible pour ce scan (statut : ' + scan.status + ').');
+          return;
+        }
+        buildReport(mapResultsToStatus(scan.results), scan.results, scan);
+      } catch (_) {}
+    });
+  }
+
+  function showHistory() {
+    if (historySection) historySection.hidden = false;
+    if (reportSectionEl) reportSectionEl.hidden = true;
+    loadHistory();
+    if (historySection) historySection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  if (historyBtn)     historyBtn.addEventListener('click', showHistory);
+  if (historyRefresh) historyRefresh.addEventListener('click', loadHistory);
+  if (newScanBtn)     newScanBtn.addEventListener('click', () => {
+    if (historySection)  historySection.hidden = true;
+    document.getElementById('scan')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  document.addEventListener('ng:auth',   () => { loadHistory(); });
+  document.addEventListener('ng:logout', () => { if (historySection) historySection.hidden = true; });
 
   // ── Form submit ────────────────────────────────────────────────────────────
   let scanning = false;
