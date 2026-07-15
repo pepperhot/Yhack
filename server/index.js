@@ -14,6 +14,7 @@ const fetch      = require('node-fetch');
 const { pool, rawDb, init, isAvailable } = require('./db');
 const { runScan }    = require('./scanManager');
 const { createUser, loginUser } = require('./auth');
+const admin = require('./admin');
 
 // Agent tolérant aux certificats invalides pour la vérification de domaine par fichier.
 const insecureAgent = new https.Agent({ rejectUnauthorized: false });
@@ -149,7 +150,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// SÉCURITÉ ADMIN : masque la page /admin et l'API admin hors IP autorisées (404).
+app.use(admin.adminIpGuard);
+
+// La page d'admin n'est servie qu'aux IP autorisées (grâce au garde ci-dessus).
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, '..', 'admin.html')));
+
 app.use(express.static(path.join(__dirname, '../'), { dotfiles: 'deny' }));
+
+// API d'administration (routes durcies : voir server/admin.js).
+app.use('/api/admin', admin.router);
 
 // ─── Health check ──────────────────────────────────────────────────────────────
 // Utilisé par Docker / le reverse proxy / le monitoring. Ne nécessite pas d'auth.
@@ -372,10 +382,11 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
           error: 'Scan actif refusé : vous devez d\'abord prouver la propriété de ce domaine.',
           code: 'DOMAIN_NOT_VERIFIED',
         });
-      // Trace d'audit : utilisateur, IP, cible, domaine vérifié.
+      // Trace d'audit : console + base (consultable dans l'interface admin).
       console.log('[AUTH-SCAN] Active scan authorized', {
         userId, ip: req.ip, target: url.href, domain: owned.domain, at: new Date().toISOString(),
       });
+      admin.logAudit(req.session.user.email, 'scan.active', `${url.href} (domaine ${owned.domain})`, req.ip);
     }
 
     const scanId    = nanoid(12);

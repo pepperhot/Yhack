@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>NetGuard — Administration</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* [hidden] doit toujours gagner, même sur les éléments en display:flex. */
+    [hidden] { display: none !important; }
+    .admin-wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 80px; }
+    .admin-top { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+    .admin-top h1 { font-size: 20px; margin: 0; margin-right: auto; }
+    .admin-badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 4px 10px; border-radius: 999px; background: rgba(255,92,138,0.12); color: #ff5c8a; border: 1px solid rgba(255,92,138,0.3); }
+
+    /* Login */
+    .admin-gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; }
+    .admin-card { width: min(400px, 100%); background: var(--panel); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px; padding: 28px; }
+    .admin-card h2 { margin: 0 0 6px; font-size: 18px; }
+    .admin-card p.sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+    .admin-card label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+      color: var(--muted); margin: 14px 0 6px; }
+    .admin-card input { width: 100%; height: 44px; padding: 0 12px; border-radius: 10px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text); outline: none; }
+    .admin-card input:focus { border-color: rgba(0,255,163,0.45); }
+    .admin-card button { width: 100%; height: 46px; margin-top: 20px; border: none; border-radius: 10px;
+      background: linear-gradient(135deg, #00ffa3, #00d0ff); color: #041016; font-weight: 700; cursor: pointer; }
+    .admin-error { margin-top: 14px; font-size: 13px; color: #ff5c8a; background: rgba(255,92,138,0.08);
+      border: 1px solid rgba(255,92,138,0.25); border-radius: 8px; padding: 10px 12px; }
+    .admin-error[hidden] { display: none; }
+
+    /* Stats */
+    .admin-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 26px; }
+    .stat-tile { background: var(--panel); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 16px; }
+    .stat-tile .n { font-size: 26px; font-weight: 700; font-family: "IBM Plex Mono", monospace; color: var(--text); }
+    .stat-tile .l { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* Onglets */
+    .admin-tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    .admin-tab { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.03); color: var(--muted); cursor: pointer; font-weight: 600; font-size: 13px; }
+    .admin-tab.active { background: rgba(0,255,163,0.08); border-color: rgba(0,255,163,0.4); color: var(--text); }
+
+    /* Tables */
+    .admin-table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
+    table.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.admin-table th { text-align: left; padding: 12px 14px; color: var(--muted); font-weight: 600;
+      border-bottom: 1px solid rgba(255,255,255,0.1); white-space: nowrap; }
+    table.admin-table td { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); color: var(--text); }
+    table.admin-table tr:last-child td { border-bottom: none; }
+    table.admin-table td.mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+    .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+    .tag--active { background: rgba(255,209,102,0.14); color: #ffd166; }
+    .tag--passive { background: rgba(0,208,255,0.12); color: #00d0ff; }
+    .tag--ok { background: rgba(0,255,163,0.12); color: #00ffa3; }
+    .tag--err { background: rgba(255,92,138,0.12); color: #ff5c8a; }
+    .btn-del { border: 1px solid rgba(255,92,138,0.35); background: rgba(255,92,138,0.06); color: #ff5c8a;
+      border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+    .btn-del:hover { background: rgba(255,92,138,0.14); }
+    .admin-empty { padding: 24px; text-align: center; color: var(--muted); }
+    .admin-ghost { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: var(--text);
+      border-radius: 10px; padding: 9px 16px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="admin-wrap">
+    <!-- Écran de connexion admin -->
+    <section id="adminGate" class="admin-gate">
+      <form id="adminLoginForm" class="admin-card" autocomplete="off">
+        <span class="admin-badge">Zone admin</span>
+        <h2 style="margin-top:14px;">Accès administration</h2>
+        <p class="sub">Réservé au compte administrateur. Accès restreint par IP + ré-authentification.</p>
+        <label for="adminEmail">Email admin</label>
+        <input id="adminEmail" type="email" autocomplete="username" placeholder="admin@exemple.com" />
+        <label for="adminPass">Mot de passe</label>
+        <input id="adminPass" type="password" autocomplete="current-password" placeholder="••••••••" />
+        <div id="adminError" class="admin-error" hidden></div>
+        <button type="submit">Déverrouiller</button>
+      </form>
+    </section>
+
+    <!-- Tableau de bord -->
+    <section id="adminDash" hidden>
+      <div class="admin-top">
+        <span class="admin-badge">Admin</span>
+        <h1 id="adminWho"></h1>
+        <button id="adminRefresh" class="admin-ghost" type="button">↻ Rafraîchir</button>
+        <button id="adminExit" class="admin-ghost" type="button">Quitter l'admin</button>
+      </div>
+
+      <div id="adminStats" class="admin-stats"></div>
+
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-tab="users">Utilisateurs</button>
+        <button class="admin-tab" data-tab="scans">Scans</button>
+        <button class="admin-tab" data-tab="domains">Domaines</button>
+        <button class="admin-tab" data-tab="audit">Journal d'audit</button>
+      </div>
+
+      <div id="adminPanel" class="admin-table-wrap">
+        <div class="admin-empty">Chargement…</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>

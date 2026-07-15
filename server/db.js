@@ -48,6 +48,17 @@ async function init() {
       UNIQUE(user_id, domain)
     );
     CREATE INDEX IF NOT EXISTS idx_domains_user_id ON verified_domains(user_id);
+
+    -- Journal d'audit : actions admin + autorisations de scans actifs.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id      TEXT PRIMARY KEY,
+      at      TEXT DEFAULT (datetime('now')),
+      actor   TEXT,
+      action  TEXT NOT NULL,
+      detail  TEXT,
+      ip      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
   `);
   console.log('[DB] SQLite prêt →', DB_PATH);
 }
@@ -74,4 +85,4 @@ const pool = {
   async end() { _db.close(); },
 };
 
-module.exports = { pool, rawDb, init, isAvailable };
+module.exports = { pool, rawDb, init, isAvailable, DB_PATH };
