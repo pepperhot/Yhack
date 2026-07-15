@@ -62,8 +62,16 @@ async function init() {
   `);
 
   // Migrations additives : ajoute les colonnes manquantes sur une base existante.
+  // (CREATE TABLE IF NOT EXISTS ne modifie PAS une table déjà créée.)
   ensureColumn('users', 'disabled',    'disabled INTEGER NOT NULL DEFAULT 0');
   ensureColumn('users', 'last_login',  'last_login TEXT');
+  // Colonnes ajoutées à `scans` après la création initiale (Phase 2 et suivantes).
+  ensureColumn('scans', 'email',        'email TEXT');
+  ensureColumn('scans', 'mode',         "mode TEXT NOT NULL DEFAULT 'passive'");
+  ensureColumn('scans', 'results',      'results TEXT');
+  ensureColumn('scans', 'lines',        "lines TEXT DEFAULT '[]'");
+  ensureColumn('scans', 'completed_at', 'completed_at TEXT');
+  ensureColumn('scans', 'duration_ms',  'duration_ms INTEGER');
 
   console.log('[DB] SQLite prêt →', DB_PATH);
 }
