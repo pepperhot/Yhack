@@ -3,8 +3,11 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const gate = $('adminGate'), dash = $('adminDash'), panel = $('adminPanel');
+  const modal = $('adminModal'), modalTitle = $('modalTitle'), modalBody = $('modalBody');
   let currentTab = 'users';
   let adminId = null;
+  // État de la vue « comptes » (persiste entre les rafraîchissements).
+  let allUsers = [], userSearch = '', userFilter = 'all';
 
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -89,21 +92,106 @@
   }
 
   function table(cols, rowsHtml) {
-    if (!rowsHtml) return '<div class="admin-empty">Aucune donnée.</div>';
-    return `<table class="admin-table"><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+    if (!rowsHtml) return '<div class="admin-table-wrap"><div class="admin-empty">Aucune donnée.</div></div>';
+    return `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
   }
 
+  // ── Comptes : recherche + filtre + actions ─────────────────────────────────
   async function loadUsers() {
-    const res = await api('/users'); const { users, adminId: aid } = await res.json(); adminId = aid;
-    panel.innerHTML = table(['Email', 'Créé le', 'Scans', 'Domaines', ''], users.map(u => `
+    const res = await api('/users'); const d = await res.json();
+    allUsers = d.users; adminId = d.adminId;
+    renderUsers();
+  }
+
+  function renderUsers() {
+    panel.innerHTML = `
+      <div class="admin-toolbar">
+        <input id="userSearch" class="admin-search" type="search" placeholder="Rechercher un email…" value="${esc(userSearch)}" />
+        <select id="userFilter" class="admin-select">
+          <option value="all">Tous les comptes</option>
+          <option value="active">Ayant fait des scans actifs</option>
+          <option value="verified">Avec domaine vérifié</option>
+          <option value="suspended">Suspendus</option>
+        </select>
+      </div>
+      <div id="usersHost"></div>`;
+    const sel = $('userFilter'); if (sel) sel.value = userFilter;
+    renderUsersTable();
+  }
+
+  function renderUsersTable() {
+    const host = $('usersHost'); if (!host) return;
+    const q = userSearch.trim().toLowerCase();
+    let list = allUsers.filter(u => !q || u.email.toLowerCase().includes(q));
+    if (userFilter === 'active')    list = list.filter(u => u.active_count > 0);
+    if (userFilter === 'verified')  list = list.filter(u => u.domain_count > 0);
+    if (userFilter === 'suspended') list = list.filter(u => u.disabled);
+    host.innerHTML = table(['Email', 'Créé le', 'Dernière connexion', 'Scans', 'Domaines', ''], list.map(u => `
       <tr>
-        <td>${esc(u.email)}${u.id === adminId ? ' <span class="tag tag--ok">admin</span>' : ''}</td>
+        <td>${esc(u.email)}${u.id === adminId ? ' <span class="tag tag--ok">admin</span>' : ''}${u.disabled ? ' <span class="tag tag--off">suspendu</span>' : ''}</td>
         <td class="mono">${fmtDate(u.created_at)}</td>
-        <td>${u.scan_count}</td>
+        <td class="mono">${u.last_login ? fmtDate(u.last_login) : '—'}</td>
+        <td>${u.scan_count}${u.active_count ? ` <span class="tag tag--active">${u.active_count} actif${u.active_count > 1 ? 's' : ''}</span>` : ''}</td>
         <td>${u.domain_count}</td>
-        <td>${u.id === adminId ? '' : `<button class="btn-del" data-del="user" data-id="${esc(u.id)}" data-label="${esc(u.email)}">Supprimer</button>`}</td>
+        <td><div class="row-actions">
+          <button class="btn-act" data-action="detail" data-id="${esc(u.id)}">Détails</button>
+          ${u.id === adminId ? '' : `
+          <button class="btn-act" data-action="password" data-id="${esc(u.id)}" data-label="${esc(u.email)}">Mot de passe</button>
+          <button class="btn-act warn" data-action="suspend" data-id="${esc(u.id)}" data-label="${esc(u.email)}" data-disabled="${u.disabled ? 1 : 0}">${u.disabled ? 'Réactiver' : 'Suspendre'}</button>
+          <button class="btn-del" data-del="user" data-id="${esc(u.id)}" data-label="${esc(u.email)}">Supprimer</button>`}
+        </div></td>
       </tr>`).join(''));
   }
+
+  async function openUserDetail(id) {
+    let d;
+    try { d = await (await api('/users/' + id)).json(); } catch (_) { return; }
+    modalTitle.textContent = d.user.email;
+    const scansRows = d.scans.map(s => `<tr>
+      <td class="mono">${esc(s.target)}</td>
+      <td><span class="tag tag--${s.mode === 'active' ? 'active' : 'passive'}">${esc(s.mode)}</span></td>
+      <td>${esc(s.status)}</td><td class="mono">${fmtDate(s.created_at)}</td></tr>`).join('');
+    const domRows = d.domains.map(x => `<tr>
+      <td class="mono">${esc(x.domain)}</td>
+      <td><span class="tag ${x.verified ? 'tag--ok' : 'tag--active'}">${x.verified ? 'vérifié' : 'en attente'}</span></td>
+      <td>${esc(x.method || '—')}</td></tr>`).join('');
+    modalBody.innerHTML = `
+      <p style="color:var(--muted);font-size:12px;margin:0;">
+        Créé : ${fmtDate(d.user.created_at)} · Dernière connexion : ${d.user.last_login ? fmtDate(d.user.last_login) : 'jamais'} ·
+        ${d.user.disabled ? '<span class="tag tag--off">suspendu</span>' : '<span class="tag tag--ok">actif</span>'}</p>
+      <div class="modal-sub">Scans (${d.scans.length})</div>
+      ${table(['Cible', 'Mode', 'Statut', 'Date'], scansRows)}
+      <div class="modal-sub">Domaines (${d.domains.length})</div>
+      ${table(['Domaine', 'État', 'Méthode'], domRows)}`;
+    modal.hidden = false;
+  }
+
+  async function resetPassword(id, label) {
+    const pw = prompt(`Nouveau mot de passe pour « ${label} » (8 caractères minimum) :`);
+    if (pw == null) return;
+    const res = await api('/users/' + id + '/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }),
+    });
+    if (res.ok) alert('Mot de passe réinitialisé.');
+    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Échec'); }
+  }
+
+  async function toggleSuspend(id, label, isDisabled) {
+    const next = !isDisabled;
+    if (!confirm(`${next ? 'Suspendre' : 'Réactiver'} le compte « ${label} » ?`)) return;
+    const res = await api('/users/' + id + '/status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled: next }),
+    });
+    if (res.ok) { loadStats(); loadUsers(); }
+    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Échec'); }
+  }
+
+  // Modale : fermeture.
+  $('modalClose').addEventListener('click', () => modal.hidden = true);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
+  // Recherche / filtre (délégation : survit aux re-rendus du tableau).
+  panel.addEventListener('input',  (e) => { if (e.target.id === 'userSearch') { userSearch = e.target.value; renderUsersTable(); } });
+  panel.addEventListener('change', (e) => { if (e.target.id === 'userFilter') { userFilter = e.target.value; renderUsersTable(); } });
 
   async function loadScans() {
     const res = await api('/scans'); const { scans } = await res.json();
@@ -143,8 +231,16 @@
       </tr>`).join(''));
   }
 
-  // ── Modération (suppression) ────────────────────────────────────────────────
+  // ── Actions (détails, mot de passe, suspension, suppression) ─────────────────
   panel.addEventListener('click', async (e) => {
+    const act = e.target.closest('[data-action]');
+    if (act) {
+      const { action, id, label, disabled } = act.dataset;
+      if (action === 'detail')   return openUserDetail(id);
+      if (action === 'password') return resetPassword(id, label);
+      if (action === 'suspend')  return toggleSuspend(id, label, disabled === '1');
+      return;
+    }
     const btn = e.target.closest('[data-del]'); if (!btn) return;
     const kind = btn.dataset.del, id = btn.dataset.id, label = btn.dataset.label;
     const what = kind === 'user' ? `le compte « ${label} » et TOUTES ses données (scans, domaines)` : `le scan « ${label} »`;

@@ -63,6 +63,33 @@
     .admin-empty { padding: 24px; text-align: center; color: var(--muted); }
     .admin-ghost { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: var(--text);
       border-radius: 10px; padding: 9px 16px; cursor: pointer; font-weight: 600; font-size: 13px; }
+
+    /* Barre d'outils (recherche + filtre) */
+    .admin-toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+    .admin-search { flex: 1; min-width: 200px; height: 40px; padding: 0 12px; border-radius: 10px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text); outline: none; }
+    .admin-search:focus { border-color: rgba(0,255,163,0.45); }
+    .admin-select { height: 40px; padding: 0 10px; border-radius: 10px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text); }
+
+    /* Actions par ligne */
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .btn-act { border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.04); color: var(--text);
+      border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .btn-act:hover { background: rgba(255,255,255,0.09); }
+    .btn-act.warn { border-color: rgba(255,209,102,0.35); color: #ffd166; background: rgba(255,209,102,0.06); }
+    .tag--off { background: rgba(255,92,138,0.14); color: #ff5c8a; }
+
+    /* Modale détail */
+    .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex;
+      align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+    .modal-back[hidden] { display: none !important; }
+    .modal-card { width: min(760px, 100%); max-height: 85vh; overflow-y: auto; background: var(--panel);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 22px; }
+    .modal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .modal-head h3 { margin: 0; margin-right: auto; font-size: 17px; font-family: "IBM Plex Mono", monospace; }
+    .modal-sub { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+      margin: 18px 0 8px; font-weight: 700; }
   </style>
 </head>
 <body>
@@ -100,10 +127,22 @@
         <button class="admin-tab" data-tab="audit">Journal d'audit</button>
       </div>
 
-      <div id="adminPanel" class="admin-table-wrap">
+      <div id="adminPanel">
         <div class="admin-empty">Chargement…</div>
       </div>
     </section>
+
+    <!-- Modale : fiche détaillée d'un compte -->
+    <div id="adminModal" class="modal-back" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <span class="admin-badge">Compte</span>
+          <h3 id="modalTitle"></h3>
+          <button id="modalClose" class="admin-ghost" type="button">Fermer</button>
+        </div>
+        <div id="modalBody"></div>
+      </div>
+    </div>
   </div>
 
   <script src="admin.js"></script>

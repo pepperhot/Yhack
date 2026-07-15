@@ -29,7 +29,20 @@ async function loginUser(email, password) {
   const user = rows[0];
   if (!user || !bcrypt.compareSync(password, user.password_hash))
     throw new Error('Email ou mot de passe incorrect');
+  if (user.disabled) throw new Error('Ce compte a été suspendu. Contactez l\'administrateur.');
+
+  await pool.query("UPDATE users SET last_login = datetime('now') WHERE id = $1", [user.id]);
   return { id: user.id, email: user.email };
 }
 
-module.exports = { createUser, loginUser };
+// Définit un nouveau mot de passe (utilisé par l'admin pour réinitialiser).
+async function setPassword(userId, newPassword) {
+  if (!newPassword || newPassword.length < 8)
+    throw new Error('Le mot de passe doit faire au moins 8 caractères');
+  const hash = bcrypt.hashSync(newPassword, 12);
+  const { rowCount } = await pool.query(
+    'UPDATE users SET password_hash = $1 WHERE id = $2', [hash, userId]);
+  if (!rowCount) throw new Error('Compte introuvable');
+}
+
+module.exports = { createUser, loginUser, setPassword };

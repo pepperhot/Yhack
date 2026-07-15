@@ -17,7 +17,7 @@ const fs       = require('fs');
 const { nanoid } = require('nanoid');
 const rateLimit  = require('express-rate-limit');
 const { pool, DB_PATH } = require('./db');
-const { loginUser } = require('./auth');
+const { loginUser, setPassword } = require('./auth');
 
 const ADMIN_EMAIL   = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 const ELEVATION_TTL = parseInt(process.env.ADMIN_ELEVATION_TTL_MIN || '15', 10) * 60 * 1000;
@@ -144,11 +144,55 @@ router.get('/stats', requireAdmin, async (req, res) => {
 
 router.get('/users', requireAdmin, async (req, res) => {
   const { rows } = await pool.query(`
-    SELECT u.id, u.email, u.created_at,
+    SELECT u.id, u.email, u.created_at, u.disabled, u.last_login,
       (SELECT count(*) FROM scans s WHERE s.user_id = u.id) AS scan_count,
+      (SELECT count(*) FROM scans s WHERE s.user_id = u.id AND s.mode='active') AS active_count,
       (SELECT count(*) FROM verified_domains d WHERE d.user_id = u.id AND d.verified=1) AS domain_count
     FROM users u ORDER BY u.created_at DESC LIMIT 500`);
-  res.json({ users: rows, adminId: req.session.user.id });
+  res.json({ users: rows.map(r => ({ ...r, disabled: !!r.disabled })), adminId: req.session.user.id });
+});
+
+// Fiche détaillée d'un compte : ses scans et ses domaines.
+router.get('/users/:id', requireAdmin, async (req, res) => {
+  const user = (await pool.query(
+    'SELECT id, email, created_at, disabled, last_login FROM users WHERE id=$1', [req.params.id])).rows[0];
+  if (!user) return res.status(404).json({ error: 'Compte introuvable' });
+  user.disabled = !!user.disabled;
+  const scans = (await pool.query(
+    `SELECT id, target, mode, status, created_at, duration_ms
+       FROM scans WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100`, [req.params.id])).rows;
+  const domains = (await pool.query(
+    `SELECT id, domain, verified, method, created_at, verified_at
+       FROM verified_domains WHERE user_id=$1 ORDER BY created_at DESC`, [req.params.id])).rows
+    .map(d => ({ ...d, verified: !!d.verified }));
+  res.json({ user, scans, domains });
+});
+
+// Suspendre / réactiver un compte (bloque la connexion sans supprimer).
+router.post('/users/:id/status', requireAdmin, async (req, res) => {
+  const id = req.params.id;
+  if (id === req.session.user.id)
+    return res.status(400).json({ error: 'Vous ne pouvez pas suspendre votre propre compte admin.' });
+  const target = (await pool.query('SELECT email FROM users WHERE id=$1', [id])).rows[0];
+  if (!target) return res.status(404).json({ error: 'Compte introuvable' });
+  const disabled = (req.body || {}).disabled ? 1 : 0;
+  await pool.query('UPDATE users SET disabled=$1 WHERE id=$2', [disabled, id]);
+  await logAudit(req.session.user.email, disabled ? 'user.suspend' : 'user.reactivate', target.email, req.ip);
+  res.json({ ok: true, disabled: !!disabled });
+});
+
+// Réinitialiser le mot de passe d'un compte.
+router.post('/users/:id/password', requireAdmin, async (req, res) => {
+  const id = req.params.id;
+  const target = (await pool.query('SELECT email FROM users WHERE id=$1', [id])).rows[0];
+  if (!target) return res.status(404).json({ error: 'Compte introuvable' });
+  try {
+    await setPassword(id, (req.body || {}).password);
+    await logAudit(req.session.user.email, 'user.password_reset', target.email, req.ip);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 router.get('/scans', requireAdmin, async (req, res) => {

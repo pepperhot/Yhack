@@ -60,7 +60,21 @@ async function init() {
     );
     CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
   `);
+
+  // Migrations additives : ajoute les colonnes manquantes sur une base existante.
+  ensureColumn('users', 'disabled',    'disabled INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('users', 'last_login',  'last_login TEXT');
+
   console.log('[DB] SQLite prêt →', DB_PATH);
+}
+
+// Ajoute une colonne si elle n'existe pas déjà (migration idempotente).
+function ensureColumn(table, column, ddl) {
+  const cols = _db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some(c => c.name === column)) {
+    _db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    console.log(`[DB] migration : colonne ${table}.${column} ajoutée`);
+  }
 }
 
 // SQLite (better-sqlite3) est toujours disponible : plus de mode mémoire.
