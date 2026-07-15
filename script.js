@@ -462,15 +462,15 @@
   }
 
   // ── Backend scan + polling ─────────────────────────────────────────────────
-  async function runBackendScan(targetUrl) {
+  async function runBackendScan(targetUrl, mode, authorized) {
     try {
-      writeLine('<span class="mono-dim"># Initializing backend scan...</span>');
+      writeLine('<span class="mono-dim"># Initializing backend scan (' + (mode || 'passive') + ')...</span>');
 
       const createRes = await fetch(API_URL + '/api/scan', {
         method:      'POST',
         credentials: 'same-origin',
         headers:     { 'Content-Type': 'application/json' },
-        body:        JSON.stringify({ targetUrl }),
+        body:        JSON.stringify({ targetUrl, mode: mode || 'passive', authorized: !!authorized }),
       });
 
       if (!createRes.ok) {
@@ -623,6 +623,120 @@
   document.addEventListener('ng:auth',   () => { loadHistory(); });
   document.addEventListener('ng:logout', () => { if (historySection) historySection.hidden = true; });
 
+  // ── Domaines vérifiés ──────────────────────────────────────────────────────
+  const domainsBtn     = document.getElementById('domainsBtn');
+  const domainsSection = document.getElementById('domainsSection');
+  const domainsList    = document.getElementById('domainsList');
+  const domainAddForm  = document.getElementById('domainAddForm');
+  const domainInput    = document.getElementById('domainInput');
+  const domainAddError = document.getElementById('domainAddError');
+
+  function renderDomain(d) {
+    const el = document.createElement('div');
+    el.className = 'domain-card ' + (d.verified ? 'domain-card--ok' : 'domain-card--pending');
+    el.dataset.id = d.id;
+    if (d.verified) {
+      el.innerHTML = `
+        <div class="domain-card__head">
+          <span class="domain-name">${escHtml(d.domain)}</span>
+          <span class="history-badge history-badge--ok">✓ Vérifié</span>
+          <button class="btn btn--ghost btn--sm domain-del" type="button">Supprimer</button>
+        </div>
+        <p class="domain-hint">Scans actifs débloqués sur ${escHtml(d.domain)} et ses sous-domaines.</p>`;
+    } else {
+      el.innerHTML = `
+        <div class="domain-card__head">
+          <span class="domain-name">${escHtml(d.domain)}</span>
+          <span class="history-badge history-badge--warn">En attente</span>
+          <button class="btn btn--primary btn--sm domain-verify" type="button">Vérifier</button>
+          <button class="btn btn--ghost btn--sm domain-del" type="button">Supprimer</button>
+        </div>
+        <p class="domain-hint">Prouvez la propriété par <strong>l'une</strong> de ces méthodes, puis cliquez « Vérifier » :</p>
+        <div class="domain-proof">
+          <div class="domain-proof__label">Option A — Enregistrement TXT DNS sur <code>${escHtml(d.domain)}</code> :</div>
+          <pre class="info-code">${escHtml(d.token)}</pre>
+          <div class="domain-proof__label">Option B — Fichier <code>https://${escHtml(d.domain)}/.well-known/netguard-verify.txt</code> contenant :</div>
+          <pre class="info-code">${escHtml(d.token)}</pre>
+        </div>`;
+    }
+    return el;
+  }
+
+  async function loadDomains() {
+    if (!domainsList) return;
+    try {
+      const res = await fetch(API_URL + '/api/domains', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const { domains } = await res.json();
+      domainsList.innerHTML = '';
+      if (!domains.length) {
+        domainsList.innerHTML = '<p class="history-empty">Aucun domaine. Ajoutez-en un pour débloquer les scans actifs.</p>';
+        return;
+      }
+      domains.forEach(d => domainsList.appendChild(renderDomain(d)));
+    } catch (_) {}
+  }
+
+  if (domainAddForm) {
+    domainAddForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (domainAddError) domainAddError.hidden = true;
+      const domain = (domainInput && domainInput.value || '').trim();
+      if (!domain) return;
+      try {
+        const res  = await fetch(API_URL + '/api/domains', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Ajout impossible');
+        if (domainInput) domainInput.value = '';
+        loadDomains();
+      } catch (err) {
+        if (domainAddError) { domainAddError.textContent = err.message; domainAddError.hidden = false; }
+      }
+    });
+  }
+
+  if (domainsList) {
+    domainsList.addEventListener('click', async (e) => {
+      const card = e.target.closest('.domain-card');
+      if (!card) return;
+      const id = card.dataset.id;
+
+      if (e.target.closest('.domain-verify')) {
+        const btn = e.target.closest('.domain-verify');
+        btn.disabled = true; btn.textContent = 'Vérification…';
+        try {
+          const res  = await fetch(API_URL + '/api/domains/' + id + '/verify', {
+            method: 'POST', credentials: 'same-origin',
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Vérification échouée');
+          loadDomains();
+        } catch (err) {
+          btn.disabled = false; btn.textContent = 'Vérifier';
+          alert(err.message);
+        }
+      } else if (e.target.closest('.domain-del')) {
+        if (!confirm('Supprimer ce domaine ? Les scans actifs seront rebloqués dessus.')) return;
+        await fetch(API_URL + '/api/domains/' + id, { method: 'DELETE', credentials: 'same-origin' });
+        loadDomains();
+      }
+    });
+  }
+
+  function showDomains() {
+    if (domainsSection) domainsSection.hidden = false;
+    if (historySection) historySection.hidden = true;
+    if (reportSectionEl) reportSectionEl.hidden = true;
+    loadDomains();
+    if (domainsSection) domainsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  if (domainsBtn) domainsBtn.addEventListener('click', showDomains);
+  document.addEventListener('ng:logout', () => { if (domainsSection) domainsSection.hidden = true; });
+
   // ── Form submit ────────────────────────────────────────────────────────────
   let scanning = false;
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -636,24 +750,50 @@
     if (input) input.disabled = active;
   }
 
+  // Mode passif/actif : la case d'attestation n'apparaît qu'en mode actif.
+  const authorizeBox = document.getElementById('scanAuthorize');
+  const authorizeChk = document.getElementById('authorizeCheck');
+  function currentMode() {
+    const el = form.querySelector('input[name="scanMode"]:checked');
+    return el ? el.value : 'passive';
+  }
+  form.querySelectorAll('input[name="scanMode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (authorizeBox) authorizeBox.hidden = currentMode() !== 'active';
+    });
+  });
+
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     if (scanning) return;
-    const url = (input && input.value || '').trim();
+    const url  = (input && input.value || '').trim();
+    const mode = currentMode();
+    const authorized = !!(authorizeChk && authorizeChk.checked);
+
+    if (mode === 'active' && !authorized) {
+      alert('Cochez l\'attestation d\'autorisation pour lancer un scan actif.');
+      return;
+    }
+
     try {
       if (!url) throw new Error('empty');
       const normalized = url.startsWith('http') ? url : 'https://' + url;
       new URL(normalized);
 
-      resetTerminal(`probe ${normalized} --modules all --deep`);
+      resetTerminal(`probe ${normalized} --mode ${mode}`);
       const reportSection = document.getElementById('fullReport');
       if (reportSection) reportSection.hidden = true;
 
       setScanningState(true);
-      runBackendScan(normalized)
+      runBackendScan(normalized, mode, authorized)
         .catch(err => {
           console.error('Scan error:', err);
-          writeLine(`<span class="mono-intense-red"># ERROR: ${escHtml(err.message)}</span>`);
+          if (/domaine/i.test(err.message) || /DOMAIN_NOT_VERIFIED/.test(err.message)) {
+            writeLine(`<span class="mono-intense-red"># ${escHtml(err.message)}</span>`);
+            writeLine('<span class="mono-dim"># → Ouvrez « Domaines » pour prouver la propriété de cette cible.</span>');
+          } else {
+            writeLine(`<span class="mono-intense-red"># ERROR: ${escHtml(err.message)}</span>`);
+          }
         })
         .finally(() => setScanningState(false));
     } catch (_) {

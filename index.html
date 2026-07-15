@@ -31,6 +31,7 @@
       <div class="nav-user" id="navUser" hidden>
         <button class="btn btn--ghost btn--sm" id="newScanBtn" type="button">Nouveau scan</button>
         <button class="btn btn--ghost btn--sm" id="historyBtn" type="button">Mes scans</button>
+        <button class="btn btn--ghost btn--sm" id="domainsBtn" type="button">Domaines</button>
         <span class="nav-user-email" id="navUserEmail"></span>
         <button class="btn btn--ghost btn--sm" id="logoutBtn" type="button">Déconnexion</button>
       </div>
@@ -48,10 +49,26 @@
             CMS et surface d'attaque. En un seul tableau de bord.
           </p>
           <form class="scan-form" aria-label="Formulaire de scan" novalidate>
-            <label class="visually-hidden" for="targetUrl">URL à analyser</label>
-            <input id="targetUrl" name="targetUrl" type="url" inputmode="url" placeholder="https://votre-site.com" aria-describedby="scanHelp" required />
-            <button class="btn btn--primary" type="submit">Analyser</button>
-            <small id="scanHelp" class="form-help">⚠️ Tests de sécurité réels (SQLi, XSS, brute-force). Utilisez uniquement avec autorisation.</small>
+            <div class="scan-form__row">
+              <label class="visually-hidden" for="targetUrl">URL à analyser</label>
+              <input id="targetUrl" name="targetUrl" type="url" inputmode="url" placeholder="https://votre-site.com" aria-describedby="scanHelp" required />
+              <button class="btn btn--primary" type="submit">Analyser</button>
+            </div>
+            <div class="scan-mode" role="radiogroup" aria-label="Type de scan">
+              <label class="scan-mode__opt">
+                <input type="radio" name="scanMode" value="passive" checked />
+                <span><strong>Passif</strong><small>Reconnaissance sans risque — tout domaine</small></span>
+              </label>
+              <label class="scan-mode__opt">
+                <input type="radio" name="scanMode" value="active" />
+                <span><strong>Actif</strong><small>SQLi, XSS, RCE… — domaine vérifié requis</small></span>
+              </label>
+            </div>
+            <label class="scan-authorize" id="scanAuthorize" hidden>
+              <input type="checkbox" id="authorizeCheck" />
+              <span>J'atteste être <strong>autorisé</strong> à réaliser des tests intrusifs sur cette cible et j'en assume l'entière responsabilité.</span>
+            </label>
+            <small id="scanHelp" class="form-help">Le scan passif est ouvert à tous. Le scan actif envoie de vrais payloads — réservé à vos domaines vérifiés.</small>
           </form>
           <div class="trust">
             <span class="chip">
@@ -119,6 +136,20 @@
         </div>
         <p class="history-empty" id="historyEmpty" hidden>Aucun scan pour l'instant. Lancez votre premier scan depuis l'accueil.</p>
         <div class="history-list" id="historyList"></div>
+      </section>
+
+      <section id="domainsSection" class="section" hidden>
+        <h2 class="section__title">Domaines vérifiés</h2>
+        <p class="section__lead">
+          Prouvez que vous possédez un domaine pour débloquer les <strong>scans actifs</strong> (SQLi, XSS, RCE…) dessus.
+          Le scan passif reste ouvert sans vérification.
+        </p>
+        <form class="domain-add" id="domainAddForm" novalidate>
+          <input id="domainInput" type="text" placeholder="mon-site.com" autocomplete="off" />
+          <button class="btn btn--primary" type="submit">Ajouter</button>
+        </form>
+        <div id="domainAddError" class="auth-error" hidden role="alert"></div>
+        <div class="domains-list" id="domainsList"></div>
       </section>
 
       <section class="section" id="features">

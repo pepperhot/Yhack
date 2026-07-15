@@ -8,9 +8,15 @@ const path      = require('path');
 const os        = require('os');
 const { nanoid } = require('nanoid');
 const rateLimit  = require('express-rate-limit');
+const dns        = require('dns').promises;
+const https      = require('https');
+const fetch      = require('node-fetch');
 const { pool, rawDb, init, isAvailable } = require('./db');
 const { runScan }    = require('./scanManager');
 const { createUser, loginUser } = require('./auth');
+
+// Agent tolérant aux certificats invalides pour la vérification de domaine par fichier.
+const insecureAgent = new https.Agent({ rejectUnauthorized: false });
 
 const app      = express();
 const PORT     = process.env.PORT || 5050;
@@ -25,12 +31,13 @@ app.set('trust proxy', 1);
 // On completion they are flushed to PostgreSQL and evicted after 60 s.
 const activeScans = new Map();
 
-async function createScan(id, target, email, userId) {
+async function createScan(id, target, email, userId, mode) {
   const scan = {
     id,
     user_id:      userId || null,
     target,
     email:        email || null,
+    mode:         mode || 'passive',
     status:       'queued',
     results:      null,
     lines:        [],
@@ -41,8 +48,8 @@ async function createScan(id, target, email, userId) {
   activeScans.set(id, scan);
   if (isAvailable()) {
     await pool.query(
-      'INSERT INTO scans (id, user_id, target, email, status) VALUES ($1, $2, $3, $4, $5)',
-      [id, userId || null, target, email || null, 'queued'],
+      'INSERT INTO scans (id, user_id, target, email, mode, status) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, userId || null, target, email || null, mode || 'passive', 'queued'],
     );
   }
   return scan;
@@ -236,10 +243,114 @@ function validateURL(targetUrl) {
   return url;
 }
 
+// ─── Vérification de propriété de domaine ────────────────────────────────────
+// Nettoie une saisie (URL, sous-domaine, majuscules…) en un domaine simple.
+function normalizeDomain(input) {
+  if (!input || typeof input !== 'string') return null;
+  let d = input.trim().toLowerCase();
+  d = d.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+  d = d.replace(/^www\./, '');
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(d)) return null;
+  return d;
+}
+
+// Un domaine vérifié couvre lui-même et tous ses sous-domaines.
+function domainCovers(verified, hostname) {
+  hostname = (hostname || '').toLowerCase().replace(/^www\./, '');
+  return hostname === verified || hostname.endsWith('.' + verified);
+}
+
+// Vérifie la propriété via TXT DNS (netguard-verify=<token>) ou fichier
+// /.well-known/netguard-verify.txt. Retourne 'dns' | 'file' | null.
+async function checkDomainOwnership(domain, token) {
+  try {
+    const txt = (await dns.resolveTxt(domain)).flat().join(' ');
+    if (txt.includes(token)) return 'dns';
+  } catch (_) {}
+  for (const proto of ['https', 'http']) {
+    try {
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(`${proto}://${domain}/.well-known/netguard-verify.txt`, {
+        signal: ctrl.signal,
+        agent: u => (u.protocol === 'https:' ? insecureAgent : undefined),
+      }).finally(() => clearTimeout(timer));
+      if (r.ok) { const t = await r.text(); if (t.includes(token)) return 'file'; }
+    } catch (_) {}
+  }
+  return null;
+}
+
+// Ajouter un domaine à vérifier → renvoie le token + les instructions.
+app.post('/api/domains', requireAuth, async (req, res) => {
+  const domain = normalizeDomain((req.body || {}).domain);
+  if (!domain) return res.status(400).json({ error: 'Domaine invalide' });
+  const userId = req.session.user.id;
+
+  const existing = (await pool.query(
+    'SELECT * FROM verified_domains WHERE user_id = $1 AND domain = $2', [userId, domain])).rows[0];
+  let row = existing;
+  if (!row) {
+    const id    = nanoid(12);
+    const token = 'netguard-verify-' + nanoid(24);
+    await pool.query(
+      'INSERT INTO verified_domains (id, user_id, domain, token) VALUES ($1, $2, $3, $4)',
+      [id, userId, domain, token]);
+    row = { id, domain, token, verified: 0 };
+  }
+  res.json({
+    domain: { id: row.id, domain: row.domain, token: row.token, verified: !!row.verified },
+    instructions: {
+      dns:  `Ajoutez un enregistrement TXT sur ${row.domain} avec la valeur : ${row.token}`,
+      file: `Déposez le fichier https://${row.domain}/.well-known/netguard-verify.txt contenant : ${row.token}`,
+    },
+  });
+});
+
+app.get('/api/domains', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT id, domain, token, verified, method, verified_at FROM verified_domains WHERE user_id = $1 ORDER BY created_at DESC',
+    [req.session.user.id]);
+  res.json({ domains: rows.map(r => ({ ...r, verified: !!r.verified })) });
+});
+
+app.post('/api/domains/:id/verify', requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT * FROM verified_domains WHERE id = $1 AND user_id = $2', [req.params.id, req.session.user.id]);
+  const row = rows[0];
+  if (!row) return res.status(404).json({ error: 'Domaine introuvable' });
+  if (row.verified) return res.json({ verified: true, method: row.method });
+
+  const method = await checkDomainOwnership(row.domain, row.token);
+  if (!method) return res.status(400).json({
+    error: 'Preuve introuvable. Vérifiez le TXT DNS ou le fichier, puis réessayez (la propagation DNS peut prendre quelques minutes).',
+  });
+
+  await pool.query(
+    "UPDATE verified_domains SET verified = 1, method = $1, verified_at = datetime('now') WHERE id = $2",
+    [method, row.id]);
+  console.log('[DOMAIN] Verified', { domain: row.domain, userId: req.session.user.id, method });
+  res.json({ verified: true, method });
+});
+
+app.delete('/api/domains/:id', requireAuth, async (req, res) => {
+  await pool.query('DELETE FROM verified_domains WHERE id = $1 AND user_id = $2',
+    [req.params.id, req.session.user.id]);
+  res.json({ ok: true });
+});
+
+// Le domaine (parmi ceux de l'utilisateur) qui couvre ce hostname ET est vérifié.
+async function verifiedDomainFor(userId, hostname) {
+  const { rows } = await pool.query(
+    'SELECT domain FROM verified_domains WHERE user_id = $1 AND verified = 1', [userId]);
+  return rows.find(r => domainCovers(r.domain, hostname)) || null;
+}
+
 // ─── POST /api/scan ───────────────────────────────────────────────────────────
 app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
   try {
-    const { targetUrl, email } = req.body || {};
+    const { targetUrl, email, authorized } = req.body || {};
+    const mode = (req.body || {}).mode === 'active' ? 'active' : 'passive';
 
     let url;
     try { url = validateURL(targetUrl); }
@@ -251,13 +362,30 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       return res.status(400).json({ error: 'Email invalide' });
 
+    const userId = req.session.user.id;
+
+    // ── Bridage : un scan ACTIF exige l'attestation + un domaine vérifié ──────
+    if (mode === 'active') {
+      if (authorized !== true)
+        return res.status(400).json({ error: 'Vous devez attester être autorisé à tester cette cible.' });
+      const owned = await verifiedDomainFor(userId, url.hostname);
+      if (!owned)
+        return res.status(403).json({
+          error: 'Scan actif refusé : vous devez d\'abord prouver la propriété de ce domaine.',
+          code: 'DOMAIN_NOT_VERIFIED',
+        });
+      // Trace d'audit (preuve d'autorisation) : utilisateur, IP, cible, domaine.
+      console.log('[AUTH-SCAN] Active scan authorized', {
+        userId, ip: req.ip, target: url.href, domain: owned.domain, at: new Date().toISOString(),
+      });
+    }
+
     const scanId    = nanoid(12);
-    const userId    = req.session.user.id;
     const startTime = Date.now();
-    await createScan(scanId, url.href, email, userId);
+    await createScan(scanId, url.href, email, userId, mode);
     await updateScan(scanId, { status: 'running' });
 
-    console.log('[API] Scan started', { scanId, target: url.href, userId });
+    console.log('[API] Scan started', { scanId, target: url.href, userId, mode });
 
     // Callback de streaming : chaque ligne est poussée dans le store en mémoire.
     const emit = (line) => {
@@ -265,7 +393,7 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
       if (s) s.lines.push(line);
     };
 
-    runScan(url, email, scanId, emit)
+    runScan(url, email, scanId, emit, mode)
       .then(async results => {
         await updateScan(scanId, {
           status:       'done',
@@ -296,7 +424,7 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
 app.get('/api/scans', requireAuth, async (req, res) => {
   if (!isAvailable()) return res.json({ scans: [] });
   const { rows } = await pool.query(
-    `SELECT id, target, status, duration_ms, created_at, completed_at
+    `SELECT id, target, mode, status, duration_ms, created_at, completed_at
        FROM scans
       WHERE user_id = $1
       ORDER BY created_at DESC

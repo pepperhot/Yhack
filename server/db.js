@@ -26,6 +26,7 @@ async function init() {
       user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,
       target       TEXT NOT NULL,
       email        TEXT,
+      mode         TEXT NOT NULL DEFAULT 'passive',
       status       TEXT NOT NULL DEFAULT 'queued',
       results      TEXT,
       lines        TEXT DEFAULT '[]',
@@ -34,6 +35,19 @@ async function init() {
       duration_ms  INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);
+
+    CREATE TABLE IF NOT EXISTS verified_domains (
+      id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      domain      TEXT NOT NULL,
+      token       TEXT NOT NULL,
+      verified    INTEGER NOT NULL DEFAULT 0,
+      method      TEXT,
+      created_at  TEXT DEFAULT (datetime('now')),
+      verified_at TEXT,
+      UNIQUE(user_id, domain)
+    );
+    CREATE INDEX IF NOT EXISTS idx_domains_user_id ON verified_domains(user_id);
   `);
   console.log('[DB] SQLite prêt →', DB_PATH);
 }

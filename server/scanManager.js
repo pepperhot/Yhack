@@ -1304,10 +1304,13 @@ async function testErrorDisclosure(url, onLine) {
 
 // ─── ORCHESTRATEUR PRINCIPAL ──────────────────────────────────────────────────
 // `emit` est un callback simple (line: string) => void fourni par l'appelant.
-// Il pousse chaque ligne dans le store du scan en cours (voir server/index.js).
-async function runScan(url, alertEmail, scanId, emit) {
-  log('INFO', 'SCAN', `Starting scan`, { target: url.href, scanId });
+// `mode` : 'passive' (recon non-intrusif, autorisé partout) ou 'active'
+// (énumération + injection — réservé aux domaines dont l'utilisateur a prouvé
+// la propriété ; le contrôle est fait côté serveur avant d'arriver ici).
+async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
+  log('INFO', 'SCAN', `Starting scan`, { target: url.href, scanId, mode });
 
+  const active  = mode === 'active';
   const results = {};
 
   const onLine = (line) => {
@@ -1323,13 +1326,13 @@ async function runScan(url, alertEmail, scanId, emit) {
   onLine('━'.repeat(50));
 
   try {
-    // ── Phase 1 : Reconnaissance (parallel) ─────────────────────────────────
+    // ── Phase passive : Reconnaissance non-intrusive (toujours exécutée) ─────
     onLine('▸ PHASE 1 — Reconnaissance passive');
 
     const [
       dnsResult, tlsResult, headersResult, corsResult,
-      cookiesResult, techResult, filesResult, robotsResult, portsResult,
-      httpsRedirectResult, mixedResult, dirListResult,
+      cookiesResult, techResult, robotsResult,
+      httpsRedirectResult, mixedResult,
     ] = await Promise.all([
       testDNS(url, onLine),
       testTLS(url, onLine),
@@ -1337,50 +1340,54 @@ async function runScan(url, alertEmail, scanId, emit) {
       testCORS(url, onLine, alertEmail),
       testCookies(url, onLine),
       testTechStack(url, onLine),
-      testSensitiveFiles(url, onLine),
       testRobots(url, onLine),
-      testPorts(url, onLine),
       testHTTPSRedirect(url, onLine),
       testMixedContent(url, onLine),
-      testDirListing(url, onLine),
     ]);
 
     Object.assign(results, {
-      dns:             dnsResult,
-      tls:             tlsResult,
-      headers:         headersResult,
-      cors:            corsResult,
-      cookies:         cookiesResult,
-      tech:            techResult,
-      sensitive_files: filesResult,
-      robots:          robotsResult,
-      ports:           portsResult,
-      https_redirect:  httpsRedirectResult,
-      mixed_content:   mixedResult,
-      dir_listing:     dirListResult,
+      dns:            dnsResult,
+      tls:            tlsResult,
+      headers:        headersResult,
+      cors:           corsResult,
+      cookies:        cookiesResult,
+      tech:           techResult,
+      robots:         robotsResult,
+      https_redirect: httpsRedirectResult,
+      mixed_content:  mixedResult,
     });
 
     onLine('━'.repeat(50));
-    await wait(300);
 
-    // ── Phase 2 : Tests actifs (sequential to avoid DoS) ────────────────────
-    onLine('▸ PHASE 2 — Tests d\'injection actifs');
+    if (!active) {
+      onLine('▸ Tests actifs NON exécutés (mode passif).');
+      onLine('▸ Vérifiez la propriété du domaine pour débloquer SQLi, XSS, RCE, etc.');
+    } else {
+      await wait(300);
 
-    results.sqli = await testSQLi(url, onLine, alertEmail); await wait(200);
-    results.xss  = await testXSS(url, onLine, alertEmail);  await wait(200);
-    results.lfi  = await testLFI(url, onLine, alertEmail);  await wait(200);
-    results.rce  = await testRCE(url, onLine, alertEmail);  await wait(200);
-    results.mako = await testSSTI(url, onLine, alertEmail); await wait(200);
+      // ── Phase active 1 : Énumération / surface ────────────────────────────
+      onLine('▸ PHASE 2 — Énumération active');
+      results.ports           = await testPorts(url, onLine);           await wait(150);
+      results.sensitive_files = await testSensitiveFiles(url, onLine);  await wait(150);
+      results.dir_listing     = await testDirListing(url, onLine);
+      onLine('━'.repeat(50));
 
-    onLine('━'.repeat(50));
+      // ── Phase active 2 : Injection (séquentiel pour éviter le DoS) ─────────
+      onLine('▸ PHASE 3 — Tests d\'injection actifs');
+      results.sqli = await testSQLi(url, onLine, alertEmail); await wait(200);
+      results.xss  = await testXSS(url, onLine, alertEmail);  await wait(200);
+      results.lfi  = await testLFI(url, onLine, alertEmail);  await wait(200);
+      results.rce  = await testRCE(url, onLine, alertEmail);  await wait(200);
+      results.mako = await testSSTI(url, onLine, alertEmail); await wait(200);
+      onLine('━'.repeat(50));
 
-    // ── Phase 3 : Tests logiques ─────────────────────────────────────────────
-    onLine('▸ PHASE 3 — Tests logiques');
-
-    results.open_redirect    = await testOpenRedirect(url, onLine);   await wait(150);
-    results.http_methods     = await testHTTPMethods(url, onLine);     await wait(150);
-    results.host_injection   = await testHostInjection(url, onLine);   await wait(150);
-    results.error_disclosure = await testErrorDisclosure(url, onLine);
+      // ── Phase active 3 : Tests logiques ───────────────────────────────────
+      onLine('▸ PHASE 4 — Tests logiques');
+      results.open_redirect    = await testOpenRedirect(url, onLine);   await wait(150);
+      results.http_methods     = await testHTTPMethods(url, onLine);     await wait(150);
+      results.host_injection   = await testHostInjection(url, onLine);   await wait(150);
+      results.error_disclosure = await testErrorDisclosure(url, onLine);
+    }
 
     // ── Score final ──────────────────────────────────────────────────────────
     const criticals = Object.values(results).filter(r => r && r.status === 'FAIL').length;
@@ -1392,6 +1399,7 @@ async function runScan(url, alertEmail, scanId, emit) {
       critical_issues: criticals,
       warnings,
       errors,
+      mode,
     };
 
     onLine('━'.repeat(50));
