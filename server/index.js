@@ -264,12 +264,6 @@ function normalizeDomain(input) {
   return d;
 }
 
-// Un domaine vérifié couvre lui-même et tous ses sous-domaines.
-function domainCovers(verified, hostname) {
-  hostname = (hostname || '').toLowerCase().replace(/^www\./, '');
-  return hostname === verified || hostname.endsWith('.' + verified);
-}
-
 // Vérifie la propriété via TXT DNS (netguard-verify=<token>) ou fichier
 // /.well-known/netguard-verify.txt. Retourne 'dns' | 'file' | null.
 async function checkDomainOwnership(domain, token) {
@@ -349,13 +343,6 @@ app.delete('/api/domains/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Le domaine (parmi ceux de l'utilisateur) qui couvre ce hostname ET est vérifié.
-async function verifiedDomainFor(userId, hostname) {
-  const { rows } = await pool.query(
-    'SELECT domain FROM verified_domains WHERE user_id = $1 AND verified = 1', [userId]);
-  return rows.find(r => domainCovers(r.domain, hostname)) || null;
-}
-
 // ─── POST /api/scan ───────────────────────────────────────────────────────────
 app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
   try {
@@ -374,19 +361,14 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
 
     const userId = req.session.user.id;
 
-    // ── Bridage : un scan ACTIF exige un domaine dont la propriété est prouvée ─
+    // Scans actifs ouverts : plus de vérification de propriété de domaine.
+    // On conserve une simple trace (console + audit), sans jamais bloquer —
+    // utile en cas de litige pour prouver qui a lancé quoi, et depuis quelle IP.
     if (mode === 'active') {
-      const owned = await verifiedDomainFor(userId, url.hostname);
-      if (!owned)
-        return res.status(403).json({
-          error: 'Scan actif refusé : vous devez d\'abord prouver la propriété de ce domaine.',
-          code: 'DOMAIN_NOT_VERIFIED',
-        });
-      // Trace d'audit : console + base (consultable dans l'interface admin).
-      console.log('[AUTH-SCAN] Active scan authorized', {
-        userId, ip: req.ip, target: url.href, domain: owned.domain, at: new Date().toISOString(),
+      console.log('[AUTH-SCAN] Active scan', {
+        userId, ip: req.ip, target: url.href, at: new Date().toISOString(),
       });
-      admin.logAudit(req.session.user.email, 'scan.active', `${url.href} (domaine ${owned.domain})`, req.ip);
+      admin.logAudit(req.session.user.email, 'scan.active', url.href, req.ip);
     }
 
     const scanId    = nanoid(12);
