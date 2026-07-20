@@ -534,34 +534,50 @@ async function testTechStack(url, onLine) {
     const jqVer = (body.match(/jquery[^\d]+([\d.]+)/i) || [])[1];
     if (jqVer) techs.push({ name: `jQuery ${jqVer}`, category: 'js' });
 
-    // Admin panel discovery (sequential, limited)
+    // Découverte de panneaux admin — on ne signale QUE si le panneau est
+    // directement accessible (HTTP 200). Une redirection 301/302 mène presque
+    // toujours vers une page de login → ce n'est PAS un panneau exposé
+    // (faux positif classique, ex. /wp-admin qui redirige vers wp-login).
     for (const p of ['/wp-admin', '/administrator', '/admin', '/phpmyadmin']) {
       try {
         const r = await safeFetch(new URL(p, url.href).href, { timeout: 3000, redirect: 'manual' });
-        if (r.status !== 404 && r.status !== 410) {
-          techs.push({ name: `Admin panel: ${p}`, category: 'admin', httpStatus: r.status });
-          onLine(`  ! Panel admin trouvé: ${esc(p)} (HTTP ${r.status})`);
+        if (r.status === 200) {
+          techs.push({ name: `Panel admin accessible: ${p}`, category: 'admin', path: p, httpStatus: 200 });
+          onLine(`  ! Panel admin accessible sans redirection (HTTP 200): ${esc(p)}`);
+        } else if (r.status === 401 || r.status === 403) {
+          onLine(`  • ${esc(p)} présent mais protégé (HTTP ${r.status}) — OK`);
         }
       } catch (_) {}
       await wait(100);
     }
 
-    const hasDisclosure = techs.some(t => t.disclosed);
-    if (!hasDisclosure && techs.length === 0) onLine('  • Technologies non identifiées depuis l\'extérieur');
+    const hasVersionDisclosure = techs.some(t => t.disclosed);
+    const openAdmin            = techs.some(t => t.category === 'admin');
+    if (!techs.length) onLine('  • Technologies non identifiées depuis l\'extérieur');
 
     const result = {
-      status: hasDisclosure ? 'WARN' : techs.some(t => t.category === 'admin') ? 'FAIL' : 'OK',
+      status: (hasVersionDisclosure || openAdmin) ? 'WARN' : 'OK',
       technologies: techs,
     };
 
-    if (hasDisclosure || techs.some(t => t.category === 'admin')) {
+    if (hasVersionDisclosure || openAdmin) {
+      const parts = [];
+      if (hasVersionDisclosure) parts.push('des versions de logiciels sont exposées (Server / X-Powered-By) — ciblage de CVE connus');
+      if (openAdmin)            parts.push('un panneau d\'administration répond directement (HTTP 200)');
       result.exploitation = {
-        description: 'Les versions/technologies exposées permettent de cibler des CVE spécifiques.',
-        example: `searchsploit "${techs.filter(t => t.disclosed || t.category === 'cms').map(t => t.name).join('" -o "')}"`,
-        tools: ['Metasploit', 'searchsploit', 'vulners.com', 'CVE Details', 'WPScan (WordPress)'],
-        impact: 'Exploitation de vulnérabilités connues (CVE), brute-force des panels admin.',
+        description: `Surface d'attaque exposée : ${parts.join(' ; ')}.`,
+        example: hasVersionDisclosure
+          ? `searchsploit "${techs.filter(t => t.disclosed || t.category === 'cms').map(t => t.name).join('" -o "')}"`
+          : techs.filter(t => t.category === 'admin').map(t => `curl -s ${url.origin}${t.path}`).join('\n'),
+        tools: ['Metasploit', 'searchsploit', 'vulners.com', 'CVE Details', 'WPScan'],
+        impact: hasVersionDisclosure
+          ? 'Exploitation de vulnérabilités connues (CVE) pour les versions exposées.'
+          : 'Accès / brute-force du panneau d\'administration.',
         cvss: 5.3,
-        remediation: 'Supprimer Server, X-Powered-By. Masquer les versions. Restreindre l\'accès aux panels admin par IP.',
+        remediation: [
+          hasVersionDisclosure ? 'Masquer les versions logicielles (Server, X-Powered-By).' : '',
+          openAdmin ? 'Restreindre l\'accès aux panneaux admin (authentification forte, filtrage par IP).' : '',
+        ].filter(Boolean).join(' '),
       };
     }
 
