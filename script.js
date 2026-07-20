@@ -528,6 +528,7 @@
             if (!pollRes.ok) throw new Error('Poll failed (' + pollRes.status + ')');
             const j = await pollRes.json();
             pollErrors = 0; // reset on success
+            if (typeof j.progress === 'number') setScanProgress(j.progress);
 
             if (j.lines && j.lines.length > lastLen) {
               for (let i = lastLen; i < j.lines.length; i++) writeLine(j.lines[i]);
@@ -536,6 +537,8 @@
 
             if (j.status === 'done') {
               clearInterval(poll);
+              setScanProgress(100);
+              setTimeout(() => showScanProgress(false), 1200);
               writeLine('<span class="mono-dim"># Scan completed ✓</span>');
               try {
                 buildReport(mapResultsToStatus(j.results), j.results, j);
@@ -547,6 +550,7 @@
               resolve(true);
             } else if (j.status === 'error') {
               clearInterval(poll);
+              showScanProgress(false);
               writeLine(`<span class="mono-intense-red"># Scan error: ${escHtml(j.results?.error)}</span>`);
               reject(new Error(j.results?.error || 'Unknown error'));
             }
@@ -768,6 +772,19 @@
   let scanning = false;
   const submitBtn = form.querySelector('button[type="submit"]');
 
+  const progEl   = document.getElementById('scanProgress');
+  const progFill  = document.getElementById('scanProgressFill');
+  const progPct  = document.getElementById('scanProgressPct');
+  function setScanProgress(pct) {
+    const p = Math.max(0, Math.min(100, Math.round(pct || 0)));
+    if (progFill) progFill.style.width = p + '%';
+    if (progPct)  progPct.textContent = p + '%';
+  }
+  function showScanProgress(show) {
+    if (progEl) progEl.hidden = !show;
+    if (show) setScanProgress(0);
+  }
+
   function setScanningState(active) {
     scanning = active;
     if (submitBtn) {
@@ -775,6 +792,7 @@
       submitBtn.textContent = active ? 'Analyse en cours…' : 'Analyser';
     }
     if (input) input.disabled = active;
+    if (active) showScanProgress(true);
   }
 
   // Mode passif / actif.
@@ -808,6 +826,7 @@
           } else {
             writeLine(`<span class="mono-intense-red"># ERROR: ${escHtml(err.message)}</span>`);
           }
+          showScanProgress(false);
         })
         .finally(() => setScanningState(false));
     } catch (_) {

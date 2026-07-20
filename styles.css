@@ -184,6 +184,16 @@ body {
   gap: 10px; margin-bottom: 8px;
 }
 
+/* Barre de progression du scan */
+.scan-progress { display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.06); }
+.scan-progress[hidden] { display: none; }
+.scan-progress__track { flex: 1; height: 6px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.scan-progress__fill { height: 100%; width: 0%; border-radius: 999px;
+  background: linear-gradient(90deg, #00ffa3, #00d0ff); transition: width 0.5s ease; }
+.scan-progress__pct { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 600;
+  color: #00ffa3; min-width: 40px; text-align: right; }
+
 /* Couverture OWASP Top 10 */
 .owasp-year { font-size: 12px; color: var(--muted); font-weight: 600; padding: 2px 8px;
   border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; margin-left: 6px; }

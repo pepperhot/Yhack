@@ -85,6 +85,10 @@
               <span class="dot"></span><span class="dot"></span><span class="dot"></span>
               <span class="title">terminal NETGUARD</span>
             </div>
+            <div class="scan-progress" id="scanProgress" hidden>
+              <div class="scan-progress__track"><div class="scan-progress__fill" id="scanProgressFill"></div></div>
+              <span class="scan-progress__pct" id="scanProgressPct">0%</span>
+            </div>
             <pre class="terminal__body"><code id="terminalBody"><span class="mono-dim">$</span> probe https://votre-site.com --modules owasp,tls,headers</code></pre>
           </div>
         </div>

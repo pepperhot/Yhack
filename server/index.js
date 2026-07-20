@@ -40,6 +40,7 @@ async function createScan(id, target, email, userId, mode) {
     email:        email || null,
     mode:         mode || 'passive',
     status:       'queued',
+    progress:     0,
     results:      null,
     lines:        [],
     created_at:   new Date().toISOString(),
@@ -71,6 +72,7 @@ async function getScan(id) {
     target:       r.target,
     email:        r.email,
     status:       r.status,
+    progress:     (r.status === 'done' || r.status === 'error') ? 100 : 0,
     results:      parse(r.results, null),
     lines:        parse(r.lines, []),
     created_at:   r.created_at,
@@ -383,8 +385,12 @@ app.post('/api/scan', requireAuth, scanLimiter, async (req, res) => {
       const s = activeScans.get(scanId);
       if (s) s.lines.push(line);
     };
+    const onProgress = (p) => {
+      const s = activeScans.get(scanId);
+      if (s) s.progress = p;
+    };
 
-    runScan(url, email, scanId, emit, mode)
+    runScan(url, email, scanId, emit, mode, onProgress)
       .then(async results => {
         await updateScan(scanId, {
           status:       'done',
@@ -441,6 +447,7 @@ app.get('/api/scan/:id', requireAuth, async (req, res) => {
   res.json({
     id:           scan.id,
     status:       scan.status,
+    progress:     scan.progress ?? (scan.status === 'done' ? 100 : 0),
     target:       scan.target,
     lines:        scan.lines,
     results:      scan.results,

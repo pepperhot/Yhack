@@ -216,18 +216,20 @@ const PAYLOADS = {
   // ─── SSTI ─────────────────────────────────────────────────────────────────
   ssti: {
     params: ['name', 'user', 'q', 'search', 'email', 'template', 'msg', 'lang', 'title', 'subject', 'body'],
-    tests: [
-      { payload: '{{7*7}}',          expected: '49',      engine: 'Jinja2/Twig'    },
-      { payload: '${7*7}',           expected: '49',      engine: 'Mako/Freemarker'},
-      { payload: '<%= 7*7 %>',       expected: '49',      engine: 'ERB/EJS'        },
-      { payload: '#{7*7}',           expected: '49',      engine: 'Ruby'           },
-      { payload: '*{7*7}',           expected: '49',      engine: 'Spring SpEL'    },
-      { payload: '{{7*\'7\'}}',      expected: '7777777', engine: 'Jinja2'         },
-      { payload: '{7*7}',            expected: '49',      engine: 'Smarty'         },
-      { payload: '#set($x=7*7)$x',   expected: '49',      engine: 'Velocity'       },
-      { payload: '[[${7*7}]]',       expected: '49',      engine: 'Thymeleaf'      },
-      { payload: '{{= 7*7 }}',       expected: '49',      engine: 'Handlebars'     },
-      { payload: '<#assign x=7*7>${x}', expected: '49',  engine: 'Freemarker'     },
+    // {A} et {B} sont remplacés par des nombres aléatoires à chaque scan : le
+    // produit est unique et improbable dans une page réelle → anti-faux-positif
+    // (fini le "49" qui traînait déjà dans la page).
+    templates: [
+      { tpl: '{{A*B}}',             engine: 'Jinja2/Twig'     },
+      { tpl: '${A*B}',              engine: 'Mako/Freemarker' },
+      { tpl: '<%= A*B %>',          engine: 'ERB/EJS'         },
+      { tpl: '#{A*B}',              engine: 'Ruby'            },
+      { tpl: '*{A*B}',              engine: 'Spring SpEL'     },
+      { tpl: '{A*B}',               engine: 'Smarty'          },
+      { tpl: '#set($x=A*B)$x',      engine: 'Velocity'        },
+      { tpl: '[[${A*B}]]',          engine: 'Thymeleaf'       },
+      { tpl: '{{= A*B }}',          engine: 'Handlebars'      },
+      { tpl: '<#assign x=A*B>${x}', engine: 'Freemarker'      },
     ],
   },
 
