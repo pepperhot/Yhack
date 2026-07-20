@@ -47,6 +47,20 @@ async function sendAlert(email, title, target, details) {
 // ─── Utilities ────────────────────────────────────────────────────────────────
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
+// Ratio de longueur entre deux réponses (1 = identiques, 0 = tout diffère).
+// Signal simple et robuste pour la SQLi blind booléenne.
+const lenRatio = (a, b) => {
+  const la = (a || '').length, lb = (b || '').length;
+  if (!la && !lb) return 1;
+  if (!la || !lb) return 0;
+  return Math.min(la, lb) / Math.max(la, lb);
+};
+
+// Détecte un NUMÉRO DE VERSION dans un en-tête (ex: "nginx/1.18.0", "PHP/7.4").
+// Le type seul ("nginx", "cloudflare", "Apache") n'est PAS une faille — seule
+// la version exposée l'est (elle permet de cibler des CVE précis).
+const hasVersion = (v) => /\d+\.\d+/.test(v || '') || /\/\d/.test(v || '');
+
 function log(level, mod, msg, data = {}) {
   const d = Object.keys(data).length ? ' ' + JSON.stringify(data).substring(0, 300) : '';
   console.log(`[${new Date().toISOString()}] [${level}] [${mod}]`, msg + d);
@@ -265,12 +279,18 @@ async function testHeaders(url, onLine) {
       else { missing.push(c); onLine(`  ! ${c.label} [${c.severity}] manquant`); }
     });
 
-    // Information disclosure
+    // Information disclosure — seule la VERSION exposée est une faille.
+    // Le type seul (Server: nginx) est informatif, pas une vulnérabilité.
     ['server', 'x-powered-by', 'x-aspnet-version', 'x-aspnetmvc-version',
      'x-generator', 'x-runtime'].forEach(h => {
-      if (headers[h]) {
+      if (!headers[h]) return;
+      // Les en-têtes x-aspnet*-version sont par nature une version.
+      const versioned = hasVersion(headers[h]) || /version/.test(h);
+      if (versioned) {
         exposing.push({ header: h, value: headers[h] });
-        onLine(`  ! Info disclosure: ${esc(h)}: ${esc(headers[h])}`);
+        onLine(`  ! Version exposée: ${esc(h)}: ${esc(headers[h])}`);
+      } else {
+        onLine(`  • ${esc(h)}: ${esc(headers[h])} (type seul, sans version — OK)`);
       }
     });
 
@@ -467,9 +487,22 @@ async function testTechStack(url, onLine) {
     const body = await resp.text();
     const techs = [];
 
-    // Server/framework via headers
-    if (headers['server'])       techs.push({ name: headers['server'],       category: 'server',    disclosed: true });
-    if (headers['x-powered-by']) techs.push({ name: headers['x-powered-by'], category: 'framework', disclosed: true });
+    // Server/framework via headers — "disclosed" seulement si une VERSION est
+    // exposée (le type seul, ex. "nginx", n'est pas une faille en soi).
+    if (headers['server']) {
+      const versioned = hasVersion(headers['server']);
+      techs.push({ name: headers['server'], category: 'server', disclosed: versioned, version_exposed: versioned });
+      onLine(versioned
+        ? `  ! Version serveur exposée: ${esc(headers['server'])}`
+        : `  • Serveur: ${esc(headers['server'])} (type seul, sans version — OK)`);
+    }
+    if (headers['x-powered-by']) {
+      const versioned = hasVersion(headers['x-powered-by']);
+      techs.push({ name: headers['x-powered-by'], category: 'framework', disclosed: versioned, version_exposed: versioned });
+      onLine(versioned
+        ? `  ! Techno + version exposée: ${esc(headers['x-powered-by'])}`
+        : `  • Techno: ${esc(headers['x-powered-by'])} (sans version)`);
+    }
 
     // CMS
     if (body.includes('wp-content') || body.includes('wp-includes') || headers['x-pingback']) {
@@ -500,11 +533,6 @@ async function testTechStack(url, onLine) {
 
     const jqVer = (body.match(/jquery[^\d]+([\d.]+)/i) || [])[1];
     if (jqVer) techs.push({ name: `jQuery ${jqVer}`, category: 'js' });
-
-    // PHP version exposure
-    if (headers['x-powered-by'] && headers['x-powered-by'].toLowerCase().includes('php')) {
-      onLine(`  ! PHP exposé dans X-Powered-By: ${esc(headers['x-powered-by'])}`);
-    }
 
     // Admin panel discovery (sequential, limited)
     for (const p of ['/wp-admin', '/administrator', '/admin', '/phpmyadmin']) {
@@ -798,6 +826,45 @@ async function testSQLi(url, onLine, alertEmail) {
       } catch (_) {}
       await wait(SCAN_DELAY);
     }
+  }
+
+  // — Boolean-based blind —
+  onLine('  ▸ Boolean-Based Blind SQLi ...');
+  for (const param of PAYLOADS.sqli.params.slice(0, 5)) {
+    try {
+      const base = new URL(url.href); base.searchParams.set(param, '1');
+      const baseText = await (await safeFetch(base.href, { timeout: 6000 })).text();
+
+      for (const { t, f } of PAYLOADS.sqli.boolean_pairs) {
+        const uT = new URL(url.href); uT.searchParams.set(param, '1' + t);
+        const uF = new URL(url.href); uF.searchParams.set(param, '1' + f);
+        const tText = await (await safeFetch(uT.href, { timeout: 6000 })).text();
+        const fText = await (await safeFetch(uF.href, { timeout: 6000 })).text();
+
+        // Vrai ≈ baseline, Faux diverge nettement → injection booléenne probable.
+        if (lenRatio(baseText, tText) > 0.97 && lenRatio(baseText, fText) < 0.85
+            && Math.abs(tText.length - fText.length) > 40) {
+          onLine(`  ! SQLi BOOLEAN-BLIND sur '${esc(param)}'`);
+          if (alertEmail) await sendAlert(alertEmail, 'SQL_INJECTION_BLIND', url.href, `Boolean-based blind on ${param}`);
+          return {
+            status: 'FAIL',
+            vulnerable: true,
+            type: 'boolean_blind',
+            param,
+            exploitation: {
+              description: 'SQLi blind booléenne : les réponses « condition vraie » et « condition fausse » diffèrent nettement → extraction bit à bit possible.',
+              example: `sqlmap -u "${url.href}?${param}=1" -p "${param}" --technique=B --dbs --batch`,
+              manual: `# Preuve manuelle :\n${url.href}?${param}=1' AND '1'='1   → page normale\n${url.href}?${param}=1' AND '1'='2   → page différente`,
+              tools: ['sqlmap', 'Burp Suite Intruder'],
+              impact: 'Extraction complète de la base, caractère par caractère (sans message d\'erreur).',
+              cvss: 8.6,
+              remediation: 'Requêtes préparées (paramétrées), réponses normalisées, WAF.',
+            },
+          };
+        }
+        await wait(SCAN_DELAY);
+      }
+    } catch (_) {}
   }
 
   onLine('  ✓ SQLi non détectée');
@@ -1302,6 +1369,138 @@ async function testErrorDisclosure(url, onLine) {
   return { status: 'OK' };
 }
 
+// ─── MODULE: Secrets exposés dans le code client (JS/HTML) ────────────────────
+async function testSecretsInJS(url, onLine) {
+  onLine('▸ [SECRETS] Clés/API exposées dans le code .....');
+  try {
+    const resp = await safeFetch(url.href, { redirect: 'follow' });
+    const html = await resp.text();
+    const sources = [{ where: 'HTML', text: html }];
+
+    // Récupère les scripts externes same-origin (limité pour rester léger).
+    const srcs = [...html.matchAll(/<script[^>]+src\s*=\s*["']([^"']+)["']/gi)]
+      .map(m => { try { return new URL(m[1], url.href).href; } catch { return null; } })
+      .filter(Boolean)
+      .filter(u => { try { return new URL(u).hostname === url.hostname; } catch { return false; } })
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .slice(0, 6);
+
+    for (const js of srcs) {
+      try {
+        const r = await safeFetch(js, { timeout: 5000 });
+        if (r.ok) sources.push({ where: js.replace(url.origin, ''), text: (await r.text()).slice(0, 500000) });
+      } catch (_) {}
+      await wait(60);
+    }
+
+    const found = [];
+    const seen  = new Set();
+    for (const src of sources) {
+      for (const p of PAYLOADS.secrets.patterns) {
+        const m = src.text.match(p.rx);
+        if (!m) continue;
+        const val = m[0];
+        const key = p.name + val.slice(0, 10);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const masked = val.length > 14 ? val.slice(0, 6) + '…' + val.slice(-4) : val.slice(0, 5) + '…';
+        found.push({ type: p.name, severity: p.sev, where: src.where, sample: masked });
+        onLine(`  ! ${esc(p.name)} exposé dans ${esc(src.where)} : ${esc(masked)}`);
+      }
+    }
+
+    if (!found.length) { onLine('  ✓ Aucun secret détecté dans le code client'); return { status: 'OK', secrets: [] }; }
+
+    const hasCritical = found.some(f => f.severity === 'CRITICAL');
+    return {
+      status: hasCritical ? 'FAIL' : 'WARN',
+      secrets: found,
+      exploitation: {
+        description: `Secrets exposés côté client : ${found.map(f => f.type).join(', ')}. N'importe quel visiteur peut les extraire du code source.`,
+        example: `# Extraire les clés du JS :\ncurl -s ${url.href} | grep -oE "AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|sk_live_[0-9a-zA-Z]+"`,
+        manual: '# Auditer tout le JS chargé :\n# TruffleHog / gitleaks sur les fichiers .js, ou chercher les patterns de clés dans les bundles.',
+        tools: ['curl', 'grep', 'TruffleHog', 'gitleaks'],
+        impact: hasCritical
+          ? 'Clé secrète/privée exposée → accès direct aux services tiers (AWS, Stripe, DB) : coûts, vol de données, compromission complète.'
+          : 'Clé/API exposée → abus de quota et accès non prévu à des services tiers.',
+        cvss: hasCritical ? 9.1 : 6.5,
+        remediation: 'Ne jamais placer de secret côté client. Révoquer + régénérer toute clé exposée. Router les appels authentifiés via un backend proxy.',
+      },
+    };
+  } catch (e) {
+    onLine(`  ! Secrets erreur: ${esc(e.message)}`);
+    return { status: 'ERROR', error: e.message };
+  }
+}
+
+// ─── MODULE: GraphQL Introspection ────────────────────────────────────────────
+async function testGraphQL(url, onLine) {
+  onLine('▸ [GRAPHQL] Introspection GraphQL ...............');
+  for (const ep of PAYLOADS.graphql.endpoints) {
+    try {
+      const u = new URL(ep, url.origin).href;
+      const r = await safeFetch(u, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: PAYLOADS.graphql.introspection,
+        timeout: 5000,
+      });
+      if (!r.ok) continue;
+      const text = await r.text();
+      if (/"__schema"|"queryType"/.test(text) && /"types"\s*:/.test(text) && /"name"/.test(text)) {
+        onLine(`  ! Introspection GraphQL activée sur ${esc(ep)}`);
+        return {
+          status: 'WARN',
+          endpoint: ep,
+          exploitation: {
+            description: `Endpoint GraphQL avec introspection activée (${ep}) : le schéma complet (types, requêtes, mutations) est exposé publiquement.`,
+            example: `curl -s ${url.origin}${ep} -H "Content-Type: application/json" -d '{"query":"{__schema{types{name fields{name}}}}"}'`,
+            manual: '# Cartographier toute l\'API à partir du schéma exposé :\n# InQL (Burp), graphql-voyager, ou clairvoyance.',
+            tools: ['InQL', 'graphql-voyager', 'clairvoyance', 'Burp Suite'],
+            impact: 'Cartographie complète de l\'API, découverte de mutations/champs sensibles, terrain préparé pour IDOR et injections.',
+            cvss: 5.3,
+            remediation: 'Désactiver l\'introspection en production. Mettre en place des persisted queries (whitelist) + rate limiting.',
+          },
+        };
+      }
+    } catch (_) {}
+    await wait(100);
+  }
+  onLine('  ✓ Pas d\'introspection GraphQL exposée');
+  return { status: 'OK' };
+}
+
+// ─── Mapping OWASP Top 10 (2021) ──────────────────────────────────────────────
+const OWASP_NAMES = {
+  'A01': 'Broken Access Control',              'A02': 'Cryptographic Failures',
+  'A03': 'Injection',                          'A04': 'Insecure Design',
+  'A05': 'Security Misconfiguration',          'A06': 'Vulnerable & Outdated Components',
+  'A07': 'Identification & Auth Failures',     'A08': 'Software & Data Integrity Failures',
+  'A09': 'Security Logging & Monitoring',      'A10': 'Server-Side Request Forgery',
+};
+const OWASP_MAP = {
+  dns: 'A05', tls: 'A02', headers: 'A05', cors: 'A05', cookies: 'A05', tech: 'A06',
+  robots: 'A01', https_redirect: 'A02', mixed_content: 'A08', secrets_js: 'A02',
+  ports: 'A05', sensitive_files: 'A01', dir_listing: 'A01', graphql: 'A05',
+  sqli: 'A03', xss: 'A03', lfi: 'A01', rce: 'A03', mako: 'A03',
+  open_redirect: 'A01', http_methods: 'A05', host_injection: 'A10', error_disclosure: 'A09',
+};
+
+// Construit la couverture OWASP : pour chaque catégorie, si testée et combien de problèmes.
+function buildOwaspCoverage(results) {
+  const cov = {};
+  for (const [cat, name] of Object.entries(OWASP_NAMES))
+    cov[cat] = { category: cat, name, tested: false, issues: 0, modules: [] };
+  for (const [mod, res] of Object.entries(results)) {
+    const cat = OWASP_MAP[mod];
+    if (!cat || !res || !res.status) continue;
+    cov[cat].tested = true;
+    cov[cat].modules.push(mod);
+    if (res.status === 'FAIL' || res.status === 'WARN') cov[cat].issues++;
+  }
+  return cov;
+}
+
 // ─── ORCHESTRATEUR PRINCIPAL ──────────────────────────────────────────────────
 // `emit` est un callback simple (line: string) => void fourni par l'appelant.
 // `mode` : 'passive' (recon non-intrusif, autorisé partout) ou 'active'
@@ -1332,7 +1531,7 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
     const [
       dnsResult, tlsResult, headersResult, corsResult,
       cookiesResult, techResult, robotsResult,
-      httpsRedirectResult, mixedResult,
+      httpsRedirectResult, mixedResult, secretsResult,
     ] = await Promise.all([
       testDNS(url, onLine),
       testTLS(url, onLine),
@@ -1343,6 +1542,7 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
       testRobots(url, onLine),
       testHTTPSRedirect(url, onLine),
       testMixedContent(url, onLine),
+      testSecretsInJS(url, onLine),
     ]);
 
     Object.assign(results, {
@@ -1355,6 +1555,7 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
       robots:         robotsResult,
       https_redirect: httpsRedirectResult,
       mixed_content:  mixedResult,
+      secrets_js:     secretsResult,
     });
 
     onLine('━'.repeat(50));
@@ -1369,7 +1570,8 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
       onLine('▸ PHASE 2 — Énumération active');
       results.ports           = await testPorts(url, onLine);           await wait(150);
       results.sensitive_files = await testSensitiveFiles(url, onLine);  await wait(150);
-      results.dir_listing     = await testDirListing(url, onLine);
+      results.dir_listing     = await testDirListing(url, onLine);      await wait(150);
+      results.graphql         = await testGraphQL(url, onLine);
       onLine('━'.repeat(50));
 
       // ── Phase active 2 : Injection (séquentiel pour éviter le DoS) ─────────
@@ -1401,6 +1603,15 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive') {
       errors,
       mode,
     };
+
+    // ── Couverture OWASP Top 10 (2021) ─────────────────────────────────────────
+    results.owasp = buildOwaspCoverage(results);
+    onLine('━'.repeat(50));
+    onLine('▸ COUVERTURE OWASP TOP 10 (2021)');
+    for (const [cat, c] of Object.entries(results.owasp)) {
+      if (!c.tested) { onLine(`  ○ ${cat} ${c.name} — non couvert`); continue; }
+      onLine(`  ${c.issues > 0 ? '⚠' : '✓'} ${cat} ${c.name} — ${c.issues > 0 ? c.issues + ' problème(s)' : 'RAS'}`);
+    }
 
     onLine('━'.repeat(50));
     onLine(`▸ RÉSULTATS : ${criticals} critique(s) | ${warnings} avertissement(s)${errors ? ` | ${errors} module(s) non analysé(s)` : ''}`);

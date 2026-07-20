@@ -158,7 +158,7 @@
     if (!results) return {};
     const keys = [
       'dns', 'tls', 'headers', 'cors', 'cookies', 'tech',
-      'sensitive_files', 'robots', 'ports',
+      'sensitive_files', 'robots', 'ports', 'secrets_js', 'graphql',
       'https_redirect', 'mixed_content', 'dir_listing',
       'sqli', 'xss', 'lfi', 'rce', 'mako',
       'open_redirect', 'http_methods', 'host_injection', 'error_disclosure', 'vulns',
@@ -177,7 +177,7 @@
       { key: 'sqli', w: 3 }, { key: 'xss', w: 3 }, { key: 'rce', w: 3 },
       { key: 'lfi',  w: 3 }, { key: 'mako', w: 3 },
       { key: 'tls',  w: 2 }, { key: 'headers', w: 2 }, { key: 'cors', w: 2 },
-      { key: 'mixed_content', w: 2 }, { key: 'host_injection', w: 2 },
+      { key: 'mixed_content', w: 2 }, { key: 'host_injection', w: 2 }, { key: 'secrets_js', w: 3 },
       { key: 'dns',  w: 1 }, { key: 'cookies', w: 1 }, { key: 'ports', w: 1 },
       { key: 'sensitive_files', w: 1 }, { key: 'robots', w: 1 },
       { key: 'tech', w: 1 }, { key: 'open_redirect', w: 1 }, { key: 'http_methods', w: 1 },
@@ -241,6 +241,8 @@
       { key: 'sensitive_files', label: 'Fichiers',      note: '.env, .git, backups...' },
       { key: 'robots',          label: 'robots.txt',    note: 'Chemins révélés' },
       { key: 'ports',           label: 'Ports TCP',     note: 'Services exposés' },
+      { key: 'secrets_js',      label: 'Secrets/Clés',  note: 'Clés API exposées dans le JS' },
+      { key: 'graphql',         label: 'GraphQL',       note: 'Introspection exposée' },
       { key: 'https_redirect',  label: 'HTTPS Redirect',note: 'HTTP → HTTPS forcé' },
       { key: 'mixed_content',   label: 'Mixed Content', note: 'Ressources http & SRI' },
       { key: 'dir_listing',     label: 'Dir Listing',   note: 'Répertoires ouverts' },
@@ -285,6 +287,29 @@
       });
     }
 
+    // ── Couverture OWASP Top 10 ────────────────────────────────────────────────
+    const owaspSection = document.getElementById('owaspSection');
+    const owaspGrid    = document.getElementById('owaspGrid');
+    const owasp        = fullResults?.owasp;
+    if (owaspGrid && owasp && typeof owasp === 'object') {
+      owaspGrid.innerHTML = '';
+      Object.values(owasp).forEach(c => {
+        if (!c || !c.category) return;
+        const state = !c.tested ? 'untested' : c.issues > 0 ? 'issues' : 'clean';
+        const badge = !c.tested ? 'non couvert' : c.issues > 0 ? `${c.issues} problème${c.issues > 1 ? 's' : ''}` : 'RAS';
+        const div = document.createElement('div');
+        div.className = `owasp-item owasp-item--${state}`;
+        div.innerHTML = `
+          <span class="owasp-cat">${escHtml(c.category)}</span>
+          <span class="owasp-name">${escHtml(c.name)}</span>
+          <span class="owasp-badge">${escHtml(badge)}</span>`;
+        owaspGrid.appendChild(div);
+      });
+      if (owaspSection) owaspSection.hidden = false;
+    } else if (owaspSection) {
+      owaspSection.hidden = true;
+    }
+
     // ── Improvements ─────────────────────────────────────────────────────────
     const NAMES = {
       headers:         'En-têtes de sécurité HTTP',
@@ -308,6 +333,8 @@
       dir_listing:     'Listing de répertoires',
       host_injection:  'Injection Host Header',
       error_disclosure:'Fuite de messages d\'erreur',
+      secrets_js:      'Secrets / clés API exposés',
+      graphql:         'Introspection GraphQL exposée',
     };
 
     const improvements = [];
@@ -534,7 +561,7 @@
           }
         }, POLL_INTERVAL);
 
-        setTimeout(() => { clearInterval(poll); reject(new Error('Scan timeout (5 minutes)')); }, 300000);
+        setTimeout(() => { clearInterval(poll); reject(new Error('Scan timeout (10 minutes)')); }, 600000);
       });
     } catch (e) {
       writeLine(`<span class="mono-intense-red"># Backend error: ${escHtml(e.message)}</span>`);

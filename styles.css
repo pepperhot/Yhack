@@ -183,6 +183,22 @@ body {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
   gap: 10px; margin-bottom: 8px;
 }
+
+/* Couverture OWASP Top 10 */
+.owasp-year { font-size: 12px; color: var(--muted); font-weight: 600; padding: 2px 8px;
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; margin-left: 6px; }
+#owaspSection { margin-top: 22px; }
+.owasp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.owasp-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--panel); border: 1px solid rgba(255,255,255,0.08); border-left: 3px solid rgba(255,255,255,0.15); }
+.owasp-item--issues { border-left-color: #ff5c8a; }
+.owasp-item--clean  { border-left-color: #00ffa3; }
+.owasp-item--untested { opacity: 0.5; }
+.owasp-cat  { font-family: "IBM Plex Mono", monospace; font-weight: 700; font-size: 13px; color: var(--text); }
+.owasp-name { flex: 1; font-size: 12px; color: var(--muted); }
+.owasp-badge { font-size: 11px; font-weight: 600; white-space: nowrap; }
+.owasp-item--issues .owasp-badge { color: #ff5c8a; }
+.owasp-item--clean  .owasp-badge { color: #00ffa3; }
 .module-card {
   background: var(--panel); border: 1px solid rgba(255,255,255,0.08);
   border-radius: 12px; padding: 12px 14px;

