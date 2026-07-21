@@ -26,6 +26,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 // Derrière un reverse proxy (Caddy/Nginx), on fait confiance au 1er proxy
 // pour récupérer la vraie IP client (rate-limit) et le bon protocole (cookies secure).
 app.set('trust proxy', 1);
+app.disable('x-powered-by');   // n'expose pas "X-Powered-By: Express" (info disclosure)
 
 // ─── Scan store ───────────────────────────────────────────────────────────────
 // Active scans stay in memory for real-time line streaming.
@@ -130,15 +131,42 @@ const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
   : null;
 
+// SÉCURITÉ CORS : le front est servi sur la MÊME origine que l'API — aucune
+// origine tierce n'a besoin d'accès. On n'autorise QUE les origines listées ;
+// sinon on n'émet AUCUN en-tête CORS (same-origin OK, cross-origin bloqué).
+// ⚠ Ne JAMAIS réfléchir l'Origin avec credentials:true (faille critique
+//   détectée par NetGuard lui-même : lecture cross-origin de données authentifiées).
 app.use(cors({
-  origin: corsOrigins
-    ? (origin, cb) => {
-        if (!origin || corsOrigins.includes(origin)) cb(null, true);
-        else cb(new Error('CORS not allowed'));
-      }
-    : true,
+  origin: corsOrigins && corsOrigins.length ? corsOrigins : false,
   credentials: true,
 }));
+
+// En-têtes de sécurité HTTP (ceux que NetGuard recommande… appliqués à NetGuard).
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; " +
+    "object-src 'none'; img-src 'self' data:; script-src 'self'; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src 'self' https://fonts.gstatic.com data:; connect-src 'self'");
+  // HSTS : seulement en HTTPS (ignoré/inutile en HTTP).
+  if (req.secure || process.env.COOKIE_SECURE === 'true')
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+
+// Rejette les méthodes HTTP inutilisées / dangereuses (TRACE = XST, etc.).
+const ALLOWED_METHODS = ['GET', 'HEAD', 'POST', 'DELETE', 'OPTIONS'];
+app.use((req, res, next) => {
+  if (!ALLOWED_METHODS.includes(req.method))
+    return res.status(405).set('Allow', 'GET, POST, DELETE').end();
+  next();
+});
+
 app.use(express.json({ limit: '1mb' }));
 
 // SÉCURITÉ : ne jamais servir la base de données ni des fichiers sensibles via HTTP.
