@@ -145,7 +145,6 @@ const PAYLOADS = {
       { rx: /FIREBASE[_A-Z]*=[A-Za-z0-9\-_]{20,}/i,              name: 'Firebase Config Key',  sev: 'HIGH'     },
       { rx: /bearer[\s=]+[A-Za-z0-9._\-]{30,}/i,                 name: 'Bearer Token',         sev: 'HIGH'     },
       { rx: /api[_-]?key[\s=:]+[A-Za-z0-9._\-]{20,}/i,           name: 'API Key',              sev: 'HIGH'     },
-      { rx: /password[\s=:]+[^\s"'<>]{8,}/i,                      name: 'Exposed Password',     sev: 'CRITICAL' },
       { rx: /AZURE_[A-Z0-9_]+=[A-Za-z0-9\-_.]+/i,                name: 'Azure Credential',     sev: 'HIGH'     },
     ],
   },
