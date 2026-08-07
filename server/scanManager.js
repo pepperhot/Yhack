@@ -1522,7 +1522,9 @@ async function testMisconfiguredServices(url, onLine) {
       if (r.status === 200) {
         const content = await r.text();
         const preview = content.slice(0, 150).replace(/\n/g, ' ');
-        onLine(`  ! ${esc(f.label)} exposé (${r.status})`);
+        // Confiance = 100% si status 200 et fichier existe + contient du contenu pertinent
+        const confidence = content.length > 20 ? 0.95 : 0.85;
+        onLine(`  ! ${esc(f.label)} exposé (${r.status}) [${Math.round(confidence*100)}% confiance]`);
         found.push({
           type: 'EXPOSED_FILE',
           severity: f.sev,
@@ -1530,6 +1532,8 @@ async function testMisconfiguredServices(url, onLine) {
           label: f.label,
           status: r.status,
           preview: preview.slice(0, 80),
+          confidence: confidence,
+          location: u,
         });
       }
     } catch (_) {}
@@ -1542,20 +1546,24 @@ async function testMisconfiguredServices(url, onLine) {
       const u = new URL(a.path, url.origin).href;
       const r = await safeFetch(u, { timeout: 3000, redirect: 'manual' });
       if ([200, 301, 302, 401, 403].includes(r.status)) {
-        onLine(`  ! ${esc(a.name)} trouvé (${r.status})`);
+        // Status 200 = high confiance, 401/403 = moyen (peut être un faux positif)
+        const confidence = r.status === 200 ? 0.98 : r.status === 401 ? 0.75 : 0.70;
+        onLine(`  ! ${esc(a.name)} trouvé (${r.status}) [${Math.round(confidence*100)}% confiance]`);
         found.push({
           type: 'ADMIN_PANEL',
           severity: r.status === 200 ? 'HIGH' : 'MEDIUM',
           path: a.path,
           name: a.name,
           status: r.status,
+          confidence: confidence,
+          location: u,
         });
       }
     } catch (_) {}
     await wait(40);
   }
 
-  // Tester les backdoors
+  // Tester les backdoors (très haute confiance si match)
   for (const b of PAYLOADS.misconfig.backdoor_paths) {
     try {
       const u = new URL(b.path, url.origin).href;
@@ -1563,12 +1571,16 @@ async function testMisconfiguredServices(url, onLine) {
       if (r.status === 200) {
         const content = await r.text();
         if (b.pattern.test(content)) {
-          onLine(`  ! Backdoor potentielle détectée : ${esc(b.path)}`);
+          // Très haute confiance : status 200 + pattern match
+          onLine(`  ! Backdoor CONFIRMÉE : ${esc(b.path)} [99% confiance]`);
           found.push({
             type: 'BACKDOOR',
             severity: 'CRITICAL',
             path: b.path,
             status: r.status,
+            confidence: 0.99,
+            location: u,
+            matchedPattern: b.pattern.toString().slice(0, 30),
           });
         }
       }
@@ -1582,11 +1594,14 @@ async function testMisconfiguredServices(url, onLine) {
     const html = await resp.text();
     for (const d of PAYLOADS.misconfig.debug_indicators) {
       if (d.rx.test(html)) {
-        onLine(`  ! ${esc(d.label)} détecté`);
+        // Confiance modérée : peut être un faux positif selon le contexte
+        onLine(`  ! ${esc(d.label)} [70% confiance]`);
         found.push({
           type: 'DEBUG_INDICATOR',
           severity: 'HIGH',
           label: d.label,
+          confidence: 0.70,
+          note: 'À vérifier : peut être une config légitime en dev',
         });
       }
     }
@@ -1601,13 +1616,21 @@ async function testMisconfiguredServices(url, onLine) {
   const criticalCount = found.filter(f => f.severity === 'CRITICAL').length;
   const highCount = found.filter(f => f.severity === 'HIGH').length;
 
+  // HTML détaillé avec confiance
+  const detailsHtml = found.map(f => {
+    const confPercent = Math.round(f.confidence * 100);
+    const statusText = `${f.type} - ${f.severity} (${confPercent}% confiance)`;
+    const location = f.location ? ` → ${f.location}` : '';
+    return `• ${f.label || f.name}: ${statusText}${location}`;
+  }).join('\n');
+
   return {
     status: hasCritical ? 'FAIL' : 'WARN',
     services: found,
     exploitation: {
-      description: `Trouvé ${criticalCount} faille(s) critique(s) et ${highCount} avertissement(s) : fichiers sensibles exposés, panneaux admin accessibles, ou backdoors.`,
-      example: `# Énumérer les fichiers :\nfor f in /.env /config.php /wp-config.php /backup.sql; do curl -s -o /dev/null -w "$f -> %{http_code}\\n" ${url.origin}$f; done`,
-      manual: 'Les fichiers exposés (surtout .env, config.php, backup.sql) révèlent des credentials directs. Les backdoors permettent l\'exécution arbitraire.',
+      description: `Trouvé ${criticalCount} faille(s) critique(s) et ${highCount} avertissement(s). Détails:\n${detailsHtml}`,
+      example: `# Tester manuellement :\ncurl -I ${url.origin}/.env\ncurl -I ${url.origin}/config.php\ncurl -I ${url.origin}/shell.php`,
+      manual: `Vérifier chaque trouvaille avec le score de confiance:\n- 95%+ : certainement exposé\n- 70-90% : probable, à confirmer\n- <70% : à vérifier (peut être faux positif)`,
       tools: ['curl', 'Burp Suite', 'dirbuster'],
       impact: `Accès à la configuration du serveur, credentials de base de données, clés API, backdoors — compromission totale du serveur.`,
       cvss: hasCritical ? 9.1 : 7.5,

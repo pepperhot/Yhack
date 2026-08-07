@@ -255,6 +255,7 @@
       { key: 'http_methods',    label: 'Méthodes HTTP', note: 'PUT, DELETE, TRACE' },
       { key: 'host_injection',  label: 'Host Header',   note: 'Injection / poisoning' },
       { key: 'error_disclosure',label: 'Erreurs',       note: 'Stack traces exposées' },
+      { key: 'misconfig',       label: 'Misconfig',     note: 'Fichiers / backdoors' },
     ];
 
     const modulesGrid = document.getElementById('modulesGrid');
@@ -335,6 +336,7 @@
       error_disclosure:'Fuite de messages d\'erreur',
       secrets_js:      'Secrets / clés API exposés',
       graphql:         'Introspection GraphQL exposée',
+      misconfig:       'Services mal configurés & backdoors',
     };
 
     const improvements = [];
@@ -457,6 +459,33 @@
       headersHtml += '</div>';
     }
 
+    // Misconfigured services details (special case for misconfig module)
+    let misconfigHtml = '';
+    if (results?.[key]?.services && Array.isArray(results[key].services)) {
+      misconfigHtml = '<div class="info-services-details" style="margin-top:1.5rem">';
+      misconfigHtml += '<div style="font-weight:600;margin-bottom:0.75rem;color:#00FFA3">Failles détectées:</div>';
+      results[key].services.forEach(function (s) {
+        const confPercent = Math.round((s.confidence || 0.8) * 100);
+        const confColor = confPercent >= 95 ? '#ff3b3b' : confPercent >= 80 ? '#ffa500' : '#ffeb3b';
+        const sev = s.severity === 'CRITICAL' ? 'critique' : s.severity === 'HIGH' ? 'eleve' : 'moyen';
+
+        misconfigHtml +=
+          '<div style="margin-bottom:1rem;padding:0.75rem;border-left:3px solid ' + confColor + ';background:rgba(255,255,255,0.03);border-radius:4px;">' +
+            '<div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">' +
+              '<span style="font-weight:600">' + escHtml(s.label || s.name || s.type) + '</span>' +
+              '<span class="improv-severity improv-severity--' + sev + '" style="font-size:0.85rem">' + escHtml(s.severity) + '</span>' +
+            '</div>' +
+            '<div style="font-size:0.9rem;color:#aaa;margin-bottom:0.5rem">' + escHtml(s.location || s.path || '') + '</div>' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem">' +
+              '<span style="color:#aaa">Confiance: <strong style="color:' + confColor + '">' + confPercent + '%</strong></span>' +
+              (s.status ? '<span style="background:#222;padding:0.25rem 0.5rem;border-radius:2px;color:#aaa">HTTP ' + s.status + '</span>' : '') +
+            '</div>' +
+            (s.note ? '<div style="font-size:0.85rem;color:#ffb84d;margin-top:0.5rem">⚠ ' + escHtml(s.note) + '</div>' : '') +
+          '</div>';
+      });
+      misconfigHtml += '</div>';
+    }
+
     // Info leakage (headers module)
     if (exp.info_leakage && exp.info_leakage.length) {
       exp.info_leakage.forEach(function (l) {
@@ -478,6 +507,7 @@
         (cvss ? '<span class="improv-cvss">CVSS&nbsp;' + cvss.toFixed(1) + '</span>' : '') +
       '</div>' +
       (desc ? '<p class="improv-desc info-modal-desc">' + escHtml(desc) + '</p>' : '') +
+      misconfigHtml +
       headersHtml +
       codesHtml +
       (exp.impact      ? '<div class="improv-impact">' + escHtml(exp.impact) + '</div>'      : '') +
