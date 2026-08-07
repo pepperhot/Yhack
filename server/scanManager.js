@@ -1509,6 +1509,113 @@ async function testGraphQL(url, onLine) {
   return { status: 'OK' };
 }
 
+// ─── MODULE: Misconfigured Services & Backdoors ───────────────────────────────
+async function testMisconfiguredServices(url, onLine) {
+  onLine('▸ [CONFIG] Services mal configurés & backdoors ......');
+  const found = [];
+
+  // Tester les fichiers sensibles
+  for (const f of PAYLOADS.misconfig.files) {
+    try {
+      const u = new URL(f.path, url.origin).href;
+      const r = await safeFetch(u, { timeout: 3000, redirect: 'manual' });
+      if (r.status === 200) {
+        const content = await r.text();
+        const preview = content.slice(0, 150).replace(/\n/g, ' ');
+        onLine(`  ! ${esc(f.label)} exposé (${r.status})`);
+        found.push({
+          type: 'EXPOSED_FILE',
+          severity: f.sev,
+          path: f.path,
+          label: f.label,
+          status: r.status,
+          preview: preview.slice(0, 80),
+        });
+      }
+    } catch (_) {}
+    await wait(40);
+  }
+
+  // Tester les chemins admin
+  for (const a of PAYLOADS.misconfig.admin_paths) {
+    try {
+      const u = new URL(a.path, url.origin).href;
+      const r = await safeFetch(u, { timeout: 3000, redirect: 'manual' });
+      if ([200, 301, 302, 401, 403].includes(r.status)) {
+        onLine(`  ! ${esc(a.name)} trouvé (${r.status})`);
+        found.push({
+          type: 'ADMIN_PANEL',
+          severity: r.status === 200 ? 'HIGH' : 'MEDIUM',
+          path: a.path,
+          name: a.name,
+          status: r.status,
+        });
+      }
+    } catch (_) {}
+    await wait(40);
+  }
+
+  // Tester les backdoors
+  for (const b of PAYLOADS.misconfig.backdoor_paths) {
+    try {
+      const u = new URL(b.path, url.origin).href;
+      const r = await safeFetch(u, { timeout: 3000, redirect: 'manual' });
+      if (r.status === 200) {
+        const content = await r.text();
+        if (b.pattern.test(content)) {
+          onLine(`  ! Backdoor potentielle détectée : ${esc(b.path)}`);
+          found.push({
+            type: 'BACKDOOR',
+            severity: 'CRITICAL',
+            path: b.path,
+            status: r.status,
+          });
+        }
+      }
+    } catch (_) {}
+    await wait(40);
+  }
+
+  // Chercher les indicateurs de debug dans la page
+  try {
+    const resp = await safeFetch(url.href, { redirect: 'follow', timeout: 5000 });
+    const html = await resp.text();
+    for (const d of PAYLOADS.misconfig.debug_indicators) {
+      if (d.rx.test(html)) {
+        onLine(`  ! ${esc(d.label)} détecté`);
+        found.push({
+          type: 'DEBUG_INDICATOR',
+          severity: 'HIGH',
+          label: d.label,
+        });
+      }
+    }
+  } catch (_) {}
+
+  if (!found.length) {
+    onLine('  ✓ Aucun service mal configuré détecté');
+    return { status: 'OK', services: [] };
+  }
+
+  const hasCritical = found.some(f => f.severity === 'CRITICAL');
+  const criticalCount = found.filter(f => f.severity === 'CRITICAL').length;
+  const highCount = found.filter(f => f.severity === 'HIGH').length;
+
+  return {
+    status: hasCritical ? 'FAIL' : 'WARN',
+    services: found,
+    exploitation: {
+      description: `Trouvé ${criticalCount} faille(s) critique(s) et ${highCount} avertissement(s) : fichiers sensibles exposés, panneaux admin accessibles, ou backdoors.`,
+      example: `# Énumérer les fichiers :\nfor f in /.env /config.php /wp-config.php /backup.sql; do curl -s -o /dev/null -w "$f -> %{http_code}\\n" ${url.origin}$f; done`,
+      manual: 'Les fichiers exposés (surtout .env, config.php, backup.sql) révèlent des credentials directs. Les backdoors permettent l\'exécution arbitraire.',
+      tools: ['curl', 'Burp Suite', 'dirbuster'],
+      impact: `Accès à la configuration du serveur, credentials de base de données, clés API, backdoors — compromission totale du serveur.`,
+      cvss: hasCritical ? 9.1 : 7.5,
+      remediation: 'Jamais exposer .env, config.php, backups. Vérifier que /admin/ nécessite authentification. Scanner le serveur pour backdoors (grep -r "shell|eval|system").',
+    },
+  };
+}
+
 // ─── Mapping OWASP Top 10 (2021) ──────────────────────────────────────────────
 const OWASP_NAMES = {
   'A01': 'Broken Access Control',              'A02': 'Cryptographic Failures',
@@ -1520,7 +1627,7 @@ const OWASP_NAMES = {
 const OWASP_MAP = {
   dns: 'A05', tls: 'A02', headers: 'A05', cors: 'A05', cookies: 'A05', tech: 'A06',
   robots: 'A01', https_redirect: 'A02', mixed_content: 'A08', secrets_js: 'A02',
-  ports: 'A05', sensitive_files: 'A01', dir_listing: 'A01', graphql: 'A05',
+  ports: 'A05', sensitive_files: 'A01', dir_listing: 'A01', misconfig: 'A01', graphql: 'A05',
   sqli: 'A03', xss: 'A03', lfi: 'A01', rce: 'A03', mako: 'A03',
   open_redirect: 'A01', http_methods: 'A05', host_injection: 'A10', error_disclosure: 'A09',
 };
@@ -1617,6 +1724,7 @@ async function runScan(url, alertEmail, scanId, emit, mode = 'passive', onProgre
       results.ports           = await testPorts(url, onLine);           setProgress(32); await wait(150);
       results.sensitive_files = await testSensitiveFiles(url, onLine);  setProgress(42); await wait(150);
       results.dir_listing     = await testDirListing(url, onLine);      setProgress(48); await wait(150);
+      results.misconfig       = await testMisconfiguredServices(url, onLine); setProgress(51); await wait(150);
       results.graphql         = await testGraphQL(url, onLine);         setProgress(54);
       onLine('━'.repeat(50));
 
