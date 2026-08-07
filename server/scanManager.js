@@ -477,6 +477,19 @@ async function testCookies(url, onLine) {
   }
 }
 
+// Serveurs/infra PaaS dont la version n'est pas exploitable (managed, immutable)
+const SAFE_PLATFORMS = /^(vercel|netlify|cloudflare|render|railway|heroku|aws cloudfront|google cloud|azure cdn|fastly)/i;
+// Serveurs/versions avec CVE connus — criticité haute
+const VULNERABLE_PATTERNS = /^(Apache\/2\.[0-2]|nginx\/1\.[0-9]$|nginx\/0\.|PHP\/5\.|PHP\/7\.[0-3]|IIS\/[5-8]\.0)/i;
+
+function isPaaSPlatform(serverString) {
+  return SAFE_PLATFORMS.test(serverString || '');
+}
+
+function isVulnerableVersion(serverString) {
+  return VULNERABLE_PATTERNS.test(serverString || '');
+}
+
 // ─── MODULE: Technology Detection ────────────────────────────────────────────
 async function testTechStack(url, onLine) {
   onLine('▸ [TECH] Détection de technologies ..............');
@@ -489,19 +502,39 @@ async function testTechStack(url, onLine) {
 
     // Server/framework via headers — "disclosed" seulement si une VERSION est
     // exposée (le type seul, ex. "nginx", n'est pas une faille en soi).
+    // Exception : les PaaS (Vercel, Netlify) ne sont PAS une faille même avec version.
     if (headers['server']) {
       const versioned = hasVersion(headers['server']);
-      techs.push({ name: headers['server'], category: 'server', disclosed: versioned, version_exposed: versioned });
-      onLine(versioned
-        ? `  ! Version serveur exposée: ${esc(headers['server'])}`
-        : `  • Serveur: ${esc(headers['server'])} (type seul, sans version — OK)`);
+      const isPaaS = isPaaSPlatform(headers['server']);
+      const isVulnerable = isVulnerableVersion(headers['server']);
+      // disclosed = true seulement si version ET vulnérable, OU version ET pas PaaS
+      const disclosed = versioned && !isPaaS && (isVulnerable || /Apache|nginx|IIS|PHP/.test(headers['server']));
+      techs.push({ name: headers['server'], category: 'server', disclosed: disclosed, version_exposed: versioned, isPaaS });
+      if (isPaaS) {
+        onLine(`  • Plateforme: ${esc(headers['server'])} (version safe, PaaS managée)`);
+      } else if (disclosed) {
+        onLine(`  ! Version serveur VULNÉRABLE exposée: ${esc(headers['server'])}`);
+      } else if (versioned) {
+        onLine(`  • Serveur: ${esc(headers['server'])} (version exposée mais pas CVE connu)`);
+      } else {
+        onLine(`  • Serveur: ${esc(headers['server'])} (type seul, sans version — OK)`);
+      }
     }
     if (headers['x-powered-by']) {
       const versioned = hasVersion(headers['x-powered-by']);
-      techs.push({ name: headers['x-powered-by'], category: 'framework', disclosed: versioned, version_exposed: versioned });
-      onLine(versioned
-        ? `  ! Techno + version exposée: ${esc(headers['x-powered-by'])}`
-        : `  • Techno: ${esc(headers['x-powered-by'])} (sans version)`);
+      const isPaaS = isPaaSPlatform(headers['x-powered-by']);
+      const isVulnerable = isVulnerableVersion(headers['x-powered-by']);
+      const disclosed = versioned && !isPaaS && (isVulnerable || /Apache|nginx|IIS|PHP/.test(headers['x-powered-by']));
+      techs.push({ name: headers['x-powered-by'], category: 'framework', disclosed: disclosed, version_exposed: versioned, isPaaS });
+      if (isPaaS) {
+        onLine(`  • Framework: ${esc(headers['x-powered-by'])} (PaaS managée)`);
+      } else if (disclosed) {
+        onLine(`  ! Techno + version VULNÉRABLE exposée: ${esc(headers['x-powered-by'])}`);
+      } else if (versioned) {
+        onLine(`  • Techno: ${esc(headers['x-powered-by'])} (version exposée)`);
+      } else {
+        onLine(`  • Techno: ${esc(headers['x-powered-by'])} (sans version)`);
+      }
     }
 
     // CMS
@@ -561,8 +594,11 @@ async function testTechStack(url, onLine) {
     };
 
     if (hasVersionDisclosure || openAdmin) {
+      const vulnerableServers = techs.filter(t => t.disclosed);
+      const isSeriousVulnerability = vulnerableServers.length > 0;
       const parts = [];
-      if (hasVersionDisclosure) parts.push('des versions de logiciels sont exposées (Server / X-Powered-By) — ciblage de CVE connus');
+      if (hasVersionDisclosure && isSeriousVulnerability) parts.push('des versions VULNÉRABLES de logiciels sont exposées (Apache 2.2, PHP 5.x, IIS 7.0…)');
+      if (hasVersionDisclosure && !isSeriousVulnerability) parts.push('des informations technologiques sont visibles mais sans CVE critique');
       if (openAdmin)            parts.push('un panneau d\'administration répond directement (HTTP 200)');
       result.exploitation = {
         description: `Surface d'attaque exposée : ${parts.join(' ; ')}.`,
@@ -570,12 +606,15 @@ async function testTechStack(url, onLine) {
           ? `searchsploit "${techs.filter(t => t.disclosed || t.category === 'cms').map(t => t.name).join('" -o "')}"`
           : techs.filter(t => t.category === 'admin').map(t => `curl -s ${url.origin}${t.path}`).join('\n'),
         tools: ['Metasploit', 'searchsploit', 'vulners.com', 'CVE Details', 'WPScan'],
-        impact: hasVersionDisclosure
-          ? 'Exploitation de vulnérabilités connues (CVE) pour les versions exposées.'
+        impact: hasVersionDisclosure && isSeriousVulnerability
+          ? 'Exploitation directe via CVE connus pour les versions vulnérables (RCE, Auth Bypass).'
+          : hasVersionDisclosure
+          ? 'Information Disclosure: facilite la reconnaissance sans exploitation immédiate.'
           : 'Accès / brute-force du panneau d\'administration.',
-        cvss: 5.3,
+        cvss: isSeriousVulnerability ? 7.5 : 4.0,
         remediation: [
-          hasVersionDisclosure ? 'Masquer les versions logicielles (Server, X-Powered-By).' : '',
+          isSeriousVulnerability ? 'URGENT: Mettre à jour les services exposés (Apache, PHP, IIS…) à leurs dernières versions.' : '',
+          hasVersionDisclosure && !isSeriousVulnerability ? 'Masquer les versions via Server/X-Powered-By headers (faible priorité si PaaS managée).' : '',
           openAdmin ? 'Restreindre l\'accès aux panneaux admin (authentification forte, filtrage par IP).' : '',
         ].filter(Boolean).join(' '),
       };
